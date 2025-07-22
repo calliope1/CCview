@@ -12,7 +12,7 @@ using CC = CardinalCharacteristic;
 public class GraphDrawer
 {
     // To do add lonesome cardinals without arrows pointing to themselves
-    public static string DrawRelationDot(HashSet<Relation> relations)
+    public static string DrawRelationDot(HashSet<Relation> relations, List<CC> cardinals)
     {
         var graph = new AdjacencyGraph<CC, Edge<CC>>();
 
@@ -31,8 +31,11 @@ public class GraphDrawer
             else cleanRelations.Add(rel);
         }
 
-        var allVertices = cleanRelations.SelectMany(rel => new[] { rel.Item1, rel.Item2 }).Distinct();
-        graph.AddVertexRange(allVertices);
+        var allVertices = cleanRelations
+            .SelectMany(rel => new[] { rel.Item1, rel.Item2 })
+            .Concat(cardinals)
+            .Distinct();
+        graph.AddVertexRange(cardinals);
 
         foreach (var rel in cleanRelations)
         {

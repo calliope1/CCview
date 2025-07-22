@@ -17,15 +17,96 @@ namespace CCView
 {
     public class Program
     {
-        private List<CC> Cardinals;
-        private HashSet<Relation> RelationSet;
-        private RelationDatabase Relations;
-
         static int Main(string[] args)
         {
+            // For now we assume that we are only ever working with one set of files: cardinal_characteristics.json and relations.json
+            var Env = new RelationEnvironment();
+
+            RootCommand rootCommand = new("Cardinal characteristics visualiser!");
+
+            // Template
+            //Option<string> optionOption = new("--string-option", "-so")
+            //{
+            //    Description = "Description of option option.",
+            //    DefaultValueFactory = parseResult => "Default value."
+            //};
+
+            //Argument<string> argumentArgument = new("argument")
+            //{
+            //    Description = "Description of argument argument.",
+            //    DefaultValueFactory = parseResult => "Not bill."
+            //};
+
+            //Command commandCommand = new("command-name", "Description.")
+            //{
+            //    optionOption,
+            //    argumentArgument
+            //};
+
+            //commandCommand.Aliases.Add("execute");
+
+            //rootCommand.Subcommands.Add(commandCommand);
+
+            //commandCommand.SetAction(parseResult => NameFunction(parseResult.GetValue(argumentArgument)));
+
+            // ///////////// //
+            // REAL COMMANDS //
+            // ///////////// //
+
+            // Add cardinal
+            Option<int> idOption = new("-id")
+            {
+                Description = "Specify id for new cardinal characteristic.",
+                DefaultValueFactory = p => -1
+            };
+            idOption.Aliases.Add("--id");
+
+            Option<bool> saveOption = new("--save")
+            {
+                Description = "Enable to save changes.",
+                DefaultValueFactory = p => false
+            };
+            rootCommand.Options.Add(saveOption);
+
+            Argument<string> nameArgument = new("name")
+            {
+                Description = "Name of cardinal characteristic."
+                //DefaultValueFactory = parseResult => ""
+            };
+
+            Command createCCCommand = new("create", "Create a new cardinal characteristic.")
+            {
+                idOption,
+                saveOption,
+                nameArgument
+            };
+
+            createCCCommand.Aliases.Add("add");
+
+            rootCommand.Subcommands.Add(createCCCommand);
+
+            createCCCommand.SetAction(parseResult =>
+            {
+                var name = parseResult.GetValue(nameArgument);
+                var newId = parseResult.GetValue(idOption);
+                var save = parseResult.GetValue(saveOption);
+                Console.WriteLine(newId);
+                if (newId == -1)
+                {
+                    Env.AddCardinal(name);
+                }
+                else
+                {
+                    Env.AddCardinal(name, newId);
+                }
+                if (save)
+                {
+                    Env.Save();
+                }
+            });
+
             // Commands to add:
             // Load cardinals and relations
-            // Add cardinals
             // Add relations
             // Compute closure
             // Draw graph (with certain input numbers)
@@ -33,41 +114,8 @@ namespace CCView
             // Exit
             // Default command line behaviour that puts you in a command line style environment
             // Note that outside of the command line environment you'll want to specify which files you're loading and unloading each time...
-            Option<int> intOption = new("--int")
-            {
-                Description = "An integer why not?",
-                DefaultValueFactory = parseResult => 31
-            };
 
-            Argument<string> nameArgument = new("name")
-            {
-                Description = "Give us a name!"
-            };
-
-            RootCommand rootCommand = new("Cardinal characteristics parser");
-            rootCommand.Options.Add(intOption);
-
-            Command nameCommand = new("name", "Description 3")
-            {
-                nameArgument
-            };
-            nameCommand.Aliases.Add("rose");
-
-            Command intCommand = new("int", "Description 4")
-            {
-                intOption
-            };
-
-            rootCommand.Subcommands.Add(nameCommand);
-            rootCommand.Subcommands.Add(intCommand);
-
-            nameCommand.SetAction(parseResult => NameFunction(
-                parseResult.GetValue(nameArgument)));
-
-            intCommand.SetAction(parseResult => IntFunction(
-                parseResult.GetValue(intOption)));
-
-            rootCommand.SetAction(parseResult => NotMain(parseResult.Tokens.Select(t => t.Value).ToArray()));
+            rootCommand.SetAction(parseResult => OldCommandInterface(Env, parseResult.Tokens.Select(t => t.Value).ToArray()));
 
             return rootCommand.Parse(args).Invoke();
         }
@@ -86,14 +134,12 @@ namespace CCView
             return intOption;
         }
 
-        public static void NotMain(string[] args)
+        public static void OldCommandInterface(RelationEnvironment env, string[] args)
         {
-            var program = new Program();
-
             while (true)
             {
                 Console.Write("> ");
-                string input = Console.ReadLine();
+                string input = Console.ReadLine() ?? "";
                 if (string.IsNullOrWhiteSpace(input))
                 {
                     continue;
@@ -116,8 +162,7 @@ namespace CCView
                         break;
                     case "save":
                         Console.WriteLine("Saving relations and cardinals...");
-                        JsonInterface.SaveRelations(program.Relations.GetRelations());
-                        JsonInterface.SaveCardinals(program.Relations.Cardinals);
+                        env.Save();
                         break;
                     case "create":
                         if (arguments.Length < 1)
@@ -125,13 +170,32 @@ namespace CCView
                             Console.WriteLine("Usage: create <name>");
                             continue;
                         }
-                        program.Relations.AddCardinal(string.Join(" ", arguments));
+                        env.AddCardinal(string.Join(" ", arguments));
                         break;
                     case "relate":
-                        Console.WriteLine("To do");
+                        if (arguments.Length != 2)
+                        {
+                            Console.WriteLine("Usage: create <id1> <id2>");
+                            continue;
+                        }
+                        // TO DO !!
+                        env.Relations.AddRelationByIds(int.Parse(arguments[0]), int.Parse(arguments[1]), '>');
+                        Console.WriteLine($"Added relation {arguments[0]}>={arguments[1]}.");
+                        break;
+                    case "list":
+                        foreach (CC c in env.Cardinals)
+                        {
+                            Console.WriteLine(c); // CCs have an override to their ToString()
+                        }
+                        break;
+                    case "listrels":
+                        foreach (Relation r in env.Relations.GetRelations())
+                        {
+                            Console.WriteLine($"{r.Item1} >= {r.Item2}.");
+                        }
                         break;
                     case "plot":
-                        var dot = GraphDrawer.DrawRelationDot(program.Relations.GetMinimalRelations());
+                        var dot = GraphDrawer.DrawRelationDot(env.Relations.GetMinimalRelations(), env.Cardinals);
                         GraphDrawer.WriteDotFile(dot, Program.GetOutputPath(), "relations.dot", "graph.png");
                         break;
                     default:
@@ -139,25 +203,6 @@ namespace CCView
                         break;
                 }
             }
-        }
-        public Program()
-        {
-            Cardinals = JsonInterface.LoadCardinals();
-            RelationSet = JsonInterface.LoadRelations(Cardinals);
-            Relations = new RelationDatabase(Cardinals, RelationSet);
-            JsonInterface.SaveRelations(Relations.GetRelations());
-
-            //for (int i = 0; i < Cardinals.Count; i++)
-            //{
-            //    Console.WriteLine("{0} {1}", Cardinals[i].Name, Cardinals[i].Id);
-            //}
-            //foreach (CC item in Cardinals)
-            //{
-            //    Console.WriteLine("{0} {1}", item.Name, item.Id);
-            //}
-            //var dot = GraphDrawer.DrawRelationDot(Relations.GetMinimalRelations());
-            //GraphDrawer.WriteDotFile(dot, GetOutputPath(), "relations.dot", "graph.png");
-            //Console.Write(Relations.GetMinimalRelations().Count());
         }
 
         public static string GetOutputPath(string filename)
@@ -169,5 +214,78 @@ namespace CCView
 
         public static string GetOutputPath() => GetOutputPath("");
 
+    }
+
+    public class RelationEnvironment
+    {
+        private String baseDirectory { get; set; }
+        public String Directory { get; set; }
+        public String CCFile { get; set; } = "cardinal_characteristics";
+        public String RelsFile { get; set; } = "relations";
+        public String CCPath { get; set; }
+        public String RelsPath { get; set; }
+        private List<CC> LoadedCardinals;
+        private HashSet<Relation> LoadedRelations;
+        public RelationDatabase Relations = new RelationDatabase();
+        public bool Unsaved { get; private set; } = false;
+        public List<CC> Cardinals => Relations.Cardinals;
+
+
+        public RelationEnvironment(string ccFile, string relsFile)
+        {
+            baseDirectory = AppContext.BaseDirectory;
+            Directory = Path.GetFullPath(Path.Combine(baseDirectory, @"../../../assets/"));
+            
+            CCFile = ccFile;
+            var ccExt = Path.GetExtension(ccFile);
+            if (ccExt != ".json")
+            {
+                CCFile += ".json";
+                if (ccExt != "")
+                {
+                    Console.WriteLine($"Warning: Cardinal characteristics file has extension other than .json. Programme will attempt to load {ccFile}.json");
+                }
+            }
+            
+            RelsFile = relsFile;
+            var relsExt = Path.GetExtension(relsFile);
+            if (relsExt != ".json")
+            {
+                RelsFile += ".json";
+                if (relsExt != "")
+                {
+                    Console.WriteLine($"Warning: Cardinal characteristics file has extension other than .json. Programme will attempt to load {relsFile}.json");
+                }
+            }
+
+            CCPath = Path.Combine(Directory, CCFile);
+            RelsPath = Path.Combine(Directory, RelsFile);
+            LoadedCardinals = JsonInterface.LoadCardinals(CCPath);
+            LoadedRelations = JsonInterface.LoadRelations(RelsPath, LoadedCardinals);
+
+            Relations = new RelationDatabase(LoadedCardinals, LoadedRelations);
+        }
+
+        public RelationEnvironment() : this("cardinal_characteristics", "relations")
+        {
+        }
+
+        public void Save()
+        {
+            JsonInterface.SaveCardinals(CCPath, Relations.Cardinals);
+            JsonInterface.SaveRelations(RelsPath, Relations.GetRelations());
+            Unsaved = false;
+        }
+
+        public void AddCardinal(string name, int id)
+        {
+            Relations.AddCardinal(name, id);
+            Unsaved = true;
+        }
+        public void AddCardinal(string name)
+        {
+            Relations.AddCardinal(name);
+            Unsaved = true;
+        }
     }
 }

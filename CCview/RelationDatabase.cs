@@ -8,69 +8,6 @@ using System.Xml.Serialization;
 using CC = CardinalCharacteristic;
 //using Microsoft.Extensions.ObjectPool;
 
-public class JsonInterface
-{
-    public static string GetAssetsPath(string filename)
-    {
-        var baseDir = AppContext.BaseDirectory;
-        var projectRoot = Path.GetFullPath(Path.Combine(baseDir, @"../../../"));
-        return Path.Combine(projectRoot, "assets", filename);
-    }
-    public static List<CC> LoadCardinals()
-    {
-        using (StreamReader r = new StreamReader(GetAssetsPath("cardinal_characteristics.json")))
-        {
-            string json = r.ReadToEnd();
-            List<CC>? items = JsonConvert.DeserializeObject<List<CC>>(json); // The ? here tells me that it could be null, and that's ok
-            return items ?? new List<CC>();
-        }
-    }
-    public static void SaveCardinals(List<CC> cardinals)
-    {
-        string json = JsonConvert.SerializeObject(cardinals, Formatting.Indented);
-        File.WriteAllText(GetAssetsPath("cardinal_characteristics.json"), json);
-    }
-
-    public static HashSet<Relation> LoadRelations(List<CC> cardinals) // Only loads the relations for the listed cardinals
-    {
-        // Add catches for if the entries don't have an id in the list of cardinals
-        var byId = cardinals.ToDictionary(c => c.Id);
-
-        using (StreamReader r = new StreamReader(GetAssetsPath("relations.json")))
-        {
-            string json = r.ReadToEnd();
-            var relationTuples = JsonConvert.DeserializeObject<List<int[]>>(json) ?? [];
-            var result = new HashSet<Relation>();
-            foreach (var tup in relationTuples)
-            {
-                if (tup.Length != 3 || !byId.ContainsKey(tup[0]) || !byId.ContainsKey(tup[1]))
-                {
-                    continue; // Optionally log
-                }
-                result.Add(new Relation(byId[tup[0]], byId[tup[1]], IntToRelationType(tup[2])));
-            }
-
-            return result;
-        }
-    }
-    public static void SaveRelations(HashSet<Relation> relations)
-    {
-        var simplified = relations.Select(rel => new[] { rel.Item1.Id, rel.Item2.Id, RelationTypeToInt(rel.Type) }).ToList();
-        string json = JsonConvert.SerializeObject(simplified, Formatting.Indented);
-        File.WriteAllText(GetAssetsPath("relations.json"), json);
-    }
-    private static int RelationTypeToInt(char type)
-    {
-        if (type == '>') return 0;
-        else throw new ArgumentException("Invalid relation type");
-    }
-    private static char IntToRelationType(int type)
-    {
-        if (type == 0) return '>';
-        else throw new ArgumentException("Invalid relation id");
-    }
-}
-
 public class CardinalCharacteristic
 {
     public int Id { get; set; }
@@ -133,6 +70,7 @@ public class RelationDatabase
 {
     public List<CC> Cardinals { get; private set; } = new List<CC>();
     private HashSet<Relation> Relations = new HashSet<Relation>();
+
     public RelationDatabase(IEnumerable<CC> cardinals, HashSet<Relation> relations)
     {
         Cardinals.AddRange(cardinals);
@@ -151,6 +89,9 @@ public class RelationDatabase
         {
             Relations.Add(new Relation(cardinal, cardinal, '>'));
         }
+    }
+    public RelationDatabase()
+    {
     }
     public static HashSet<Relation> ComputeTransitiveClosure(HashSet<Relation> relation)
     {
@@ -203,15 +144,37 @@ public class RelationDatabase
             Relations = ComputeTransitiveClosure(Relations);
         }
     }
-
-    public void AddCardinal(string name)
+    public int NewId(bool fast = false)
     {
-        // Improve this later
-        int newId = Cardinals.Count > 0 ? Cardinals.Max(c => c.Id) + 1 : 0; // Generate a new ID
-        var newCardinal = new CC(newId, name);
+        if (fast)
+        {
+            return Cardinals.Count;
+        }
+        else
+        {
+            var newId = 0;
+            var usedIds = new HashSet<int>(Cardinals.Select(c => c.Id));
+            while (usedIds.Contains(newId))
+            {
+                newId++;
+            }
+            return newId;
+        }
+    }
+    public void AddCardinal(string name, int id)
+    {
+        if (Cardinals.Any(c => c.Id == id))
+        {
+            throw new ArgumentException($"ID {id} is in use by {CardinalById(id)}.");
+        }
+        var newCardinal = new CC(id, name);
         Cardinals.Add(newCardinal);
         Relations.Add(new Relation(newCardinal, newCardinal, '>')); // Reflexivity
         Console.WriteLine($"Added new cardinal: {newCardinal}");
+    }
+    public void AddCardinal(string name, bool fast = false)
+    {
+        AddCardinal(name, NewId(fast));
     }
     public bool IsRelated(CC a, CC b, char type)
     {
@@ -287,5 +250,24 @@ public class RelationDatabase
             }
         }
         return minimalRelations;
+    }
+
+    public CC? CardinalById(int id)
+    {
+        CC? match = Cardinals.SingleOrDefault(c => c.Id == id);
+        if (match != null)
+        {
+            return match;
+        }
+        else
+        {
+            Console.WriteLine($"No cardinal with id {id} found.");
+            return null;
+        }
+    }
+
+    public void AddRelationByIds(int id1, int id2, char type)
+    {
+        AddRelation(CardinalById(id1), CardinalById(id2), type);
     }
 }
