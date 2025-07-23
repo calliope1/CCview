@@ -10,14 +10,20 @@ using CC = CardinalCharacteristic;
 
 public class CardinalCharacteristic
 {
-    public int Id { get; set; }
+    public int Id { get; private set; }
     public string Name { get; set; } = "No name assigned";
+    public string Symbol { get; set; } = "X";
 
     [JsonConstructor] // Telling Json.NET to use this constructor
-    public CardinalCharacteristic(int id, string name)
+    public CardinalCharacteristic(int id, string name, string symbol)
     {
         Id = id;
         Name = name ?? "No name assigned";
+        Symbol = symbol ?? "X";
+    }
+
+    public CardinalCharacteristic(int id, string name) : this(id, name, "X")
+    {
     }
 
     public override bool Equals(object? obj)
@@ -121,7 +127,7 @@ public class RelationDatabase
         return newRelation;
     }
 
-    public void AddRelation(CC a, CC b, char type, bool lazy = false)
+    public void AddRelation(CC a, CC b, char type, bool lazy = true)
     {
         if (!Cardinals.Contains(a) || !Cardinals.Contains(b))
         {
@@ -161,7 +167,7 @@ public class RelationDatabase
             return newId;
         }
     }
-    public void AddCardinal(string name, int id)
+    public void AddCardinal(string? name, int id)
     {
         if (Cardinals.Any(c => c.Id == id))
         {
@@ -172,7 +178,7 @@ public class RelationDatabase
         Relations.Add(new Relation(newCardinal, newCardinal, '>')); // Reflexivity
         Console.WriteLine($"Added new cardinal: {newCardinal}");
     }
-    public void AddCardinal(string name, bool fast = false)
+    public void AddCardinal(string? name, bool fast = false)
     {
         AddCardinal(name, NewId(fast));
     }

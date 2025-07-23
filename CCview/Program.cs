@@ -22,6 +22,11 @@ namespace CCView
             // For now we assume that we are only ever working with one set of files: cardinal_characteristics.json and relations.json
             var Env = new RelationEnvironment();
 
+            return Run(Env, args);
+        }
+
+        public static int Run(RelationEnvironment env, string[] args)
+        {
             RootCommand rootCommand = new("Cardinal characteristics visualiser!");
 
             // Template
@@ -53,7 +58,7 @@ namespace CCView
             // REAL COMMANDS //
             // ///////////// //
 
-            // Add cardinal
+            // Options //
             Option<int> idOption = new("-id")
             {
                 Description = "Specify id for new cardinal characteristic.",
@@ -66,48 +71,105 @@ namespace CCView
                 Description = "Enable to save changes.",
                 DefaultValueFactory = p => false
             };
-            rootCommand.Options.Add(saveOption);
 
+            Option<char> typeOption = new("--type")
+            {
+                Description = "Type of relation.",
+                DefaultValueFactory = p => '>'
+            };
+
+            Option<bool> pngOption = new("--toPng")
+            {
+                Description = "Also saves graph as a png.",
+                DefaultValueFactory = p > false
+            };
+
+            Option<string> fileOption = new("--saveAs")
+            {
+                Description = "Save as a specified file."
+            };
+
+            // Arguments //
             Argument<string> nameArgument = new("name")
             {
                 Description = "Name of cardinal characteristic."
                 //DefaultValueFactory = parseResult => ""
             };
 
+            Argument<int[]> idArgument = new("ids")
+            {
+                Description = "Ids of cardinal characteristics."
+            };
+
+            // Commands //
+
+            // Add cardinal
             Command createCCCommand = new("create", "Create a new cardinal characteristic.")
             {
                 idOption,
                 saveOption,
                 nameArgument
             };
-
             createCCCommand.Aliases.Add("add");
-
             rootCommand.Subcommands.Add(createCCCommand);
 
             createCCCommand.SetAction(parseResult =>
             {
-                var name = parseResult.GetValue(nameArgument);
+                string? name = parseResult.GetValue(nameArgument);
                 var newId = parseResult.GetValue(idOption);
                 var save = parseResult.GetValue(saveOption);
-                Console.WriteLine(newId);
                 if (newId == -1)
                 {
-                    Env.AddCardinal(name);
+                    env.AddCardinal(name);
                 }
                 else
                 {
-                    Env.AddCardinal(name, newId);
+                    env.AddCardinal(name, newId);
                 }
                 if (save)
                 {
-                    Env.Save();
+                    env.Save();
                 }
             });
 
+            // Add relation
+            Command relateCommand = new("relate", "Add a relation between two cardinals.")
+            {
+                idArgument,
+                typeOption
+            };
+            rootCommand.Subcommands.Add(relateCommand);
+
+            relateCommand.SetAction(pR =>
+            {
+                int[] ids = pR.GetValue(idArgument);
+                char type = pR.GetValue(typeOption);
+                env.RelateCardinals(ids[0], ids[1], type);
+            });
+
+            // Save
+            Command saveCommand = new("save", "Save the cardinals and relations.");
+            rootCommand.Subcommands.Add(saveCommand);
+
+            saveCommand.SetAction(pR => env.Save());
+
+            //Plot
+            Command plotCommand = new("plot", "Draw the relations as a dot graph.")
+            {
+                pngOption,
+                fileOption
+            };
+            rootCommand.Subcommands.Add(plotCommand);
+
+            plotCommand.SetAction(pR =>
+            {
+                env.PlotGraphDot([]);
+                // TO DO !!
+            });
+
+
             // Commands to add:
             // Load cardinals and relations
-            // Add relations
             // Compute closure
             // Draw graph (with certain input numbers)
             // Save everything
@@ -115,7 +177,45 @@ namespace CCView
             // Default command line behaviour that puts you in a command line style environment
             // Note that outside of the command line environment you'll want to specify which files you're loading and unloading each time...
 
-            rootCommand.SetAction(parseResult => OldCommandInterface(Env, parseResult.Tokens.Select(t => t.Value).ToArray()));
+            // ccv
+            Command commandLineCommand = new("ccv", "Old command line behaviour.");
+            rootCommand.Subcommands.Add(commandLineCommand);
+            commandLineCommand.SetAction(pR =>
+            {
+                OldCommandInterface(env, pR.Tokens.Select(t => t.Value).ToArray());
+            });
+
+            //ccn
+            Command newLineCommand = new("ccn", "New command line behaviour.");
+            rootCommand.Subcommands.Add(newLineCommand);
+            newLineCommand.SetAction(pR =>
+            {
+                while (true)
+                {
+                    Console.Write("> ");
+                    string input = Console.ReadLine() ?? "";
+                    if (string.IsNullOrWhiteSpace(input))
+                    {
+                        continue;
+                    }
+                    string[] args = input.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (args[0].Equals("exit", StringComparison.CurrentCultureIgnoreCase))
+                    {
+                        if (env.Unsaved)
+                        {
+                            Console.Write("You have unsaved changes. Are you sure? [Y]es/[N]o (Default No). ");
+                            string verify = Console.ReadLine() ?? "N";
+                            if (verify.Equals("yes", StringComparison.CurrentCultureIgnoreCase) || verify.Equals("y", StringComparison.CurrentCultureIgnoreCase))
+                            {
+                                return;
+                            }
+                        }
+                    }
+                    rootCommand.Parse(args).Invoke();
+                }
+            });
+
+            rootCommand.SetAction(pR => Console.WriteLine("Default behaviour!"));
 
             return rootCommand.Parse(args).Invoke();
         }
@@ -277,15 +377,25 @@ namespace CCView
             Unsaved = false;
         }
 
-        public void AddCardinal(string name, int id)
+        public void AddCardinal(string? name, int id)
         {
             Relations.AddCardinal(name, id);
             Unsaved = true;
         }
-        public void AddCardinal(string name)
+        public void AddCardinal(string? name)
         {
             Relations.AddCardinal(name);
             Unsaved = true;
+        }
+        public void RelateCardinals(int idOne, int idTwo, char type)
+        {
+            Relations.AddRelationByIds(idOne, idTwo, type);
+            Unsaved = true;
+        }
+
+        public void PlotGraphDot(int[] ids) // IMPLEMENT
+        {
+            return;
         }
     }
 }
