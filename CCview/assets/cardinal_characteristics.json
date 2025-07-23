@@ -1,10 +1,27 @@
 [
   {
     "Id": 0,
-    "Name": "splitting number"
+    "Name": "splitting number",
+    "Symbol": "X"
   },
   {
     "Id": 1,
-    "Name": "reaping number"
+    "Name": "reaping number",
+    "Symbol": "X"
+  },
+  {
+    "Id": 2,
+    "Name": "a",
+    "Symbol": "X"
+  },
+  {
+    "Id": 3,
+    "Name": "a",
+    "Symbol": "X"
+  },
+  {
+    "Id": 4,
+    "Name": "a",
+    "Symbol": "X"
   }
 ]

@@ -171,7 +171,7 @@ public class RelationDatabase
     {
         if (Cardinals.Any(c => c.Id == id))
         {
-            throw new ArgumentException($"ID {id} is in use by {CardinalById(id)}.");
+            throw new ArgumentException($"ID {id} is in use by {GetCardinalById(id)}.");
         }
         var newCardinal = new CC(id, name);
         Cardinals.Add(newCardinal);
@@ -190,12 +190,7 @@ public class RelationDatabase
     {
         return Relations;
     }
-
-    public HashSet<Relation> GetMinimalRelations()
-    {
-        return GetMinimalRelations(Cardinals.ToHashSet());
-    }
-    public HashSet<Relation> GetMinimalRelations(HashSet<CC> desiredCardinals)
+    public HashSet<Relation> GetMinimalRelations(List<CC> desiredCardinals)
     {
         var testRelation = new Relation(new CC(-1, "Test"), new CC(-1, "Test"), '>');
         var minimalRelations = new HashSet<Relation>();
@@ -257,8 +252,12 @@ public class RelationDatabase
         }
         return minimalRelations;
     }
+    public HashSet<Relation> GetMinimalRelations()
+    {
+        return GetMinimalRelations(Cardinals);
+    }
 
-    public CC? CardinalById(int id)
+    public CC? GetCardinalById(int id)
     {
         CC? match = Cardinals.SingleOrDefault(c => c.Id == id);
         if (match != null)
@@ -274,6 +273,6 @@ public class RelationDatabase
 
     public void AddRelationByIds(int id1, int id2, char type)
     {
-        AddRelation(CardinalById(id1), CardinalById(id2), type);
+        AddRelation(GetCardinalById(id1), GetCardinalById(id2), type);
     }
 }

@@ -55,21 +55,30 @@ public class GraphDrawer
         return dot;
     }
 
-    public static void WriteDotFile(string dot, string outputDotPath, string outputFileName, string outputPngName)
+    public static void WriteDotFile(string dot, string outputDotPath, string outputFileName)
     {
         File.WriteAllText(Path.Combine(outputDotPath, outputFileName), dot);
 
         Console.WriteLine($"DOT file written to {outputDotPath}\"{outputFileName}");
         //Console.WriteLine("You can render it using Graphviz:");
         //Console.WriteLine($"> dot -Tpng \"{outputDotPath}\\{outputFileName}\" -o graph.png");
+    }
 
+    public static void WriteDotFile(string dot, string outputDotPath)
+    {
+        File.WriteAllText(outputDotPath, dot);
+        Console.WriteLine($"DOT file written to {outputDotPath}");
+    }
+
+    public static void WritePngFile(string dotFilePath, string dotFileName, string outputFilePath, string outputFileName)
+    {
         var process = new System.Diagnostics.Process
         {
             StartInfo = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = "dot",
-                Arguments = $"-Tpng \"{Path.Combine(outputDotPath, outputFileName)}\" -o \"{Path.Combine(outputDotPath, outputPngName)}\"",
-                WorkingDirectory = outputDotPath,
+                Arguments = $"-Tpng \"{Path.Combine(dotFilePath, dotFileName)}\" -o \"{Path.Combine(outputFilePath, outputFileName)}\"",
+                WorkingDirectory = outputFilePath,
                 RedirectStandardOutput = false,
                 UseShellExecute = false,
                 CreateNoWindow = true
@@ -78,6 +87,6 @@ public class GraphDrawer
         process.Start();
         process.WaitForExit();
 
-        Console.WriteLine($"Graph image generated as {outputPngName}");
+        Console.WriteLine($"Graph image generated as {Path.Combine(outputFilePath, outputFileName)}");
     }
 }
