@@ -29,18 +29,10 @@ namespace JsonHandler
                 return items ?? new List<CC>();
             }
         }
-        public static List<CC> LoadCardinals() // Temporary, delete when not needed
-        {
-            return LoadCardinals(GetAssetsPath("cardinal_characteristics.json"));
-        }
         public static void SaveCardinals(String path, List<CC> cardinals)
         {
             string json = JsonConvert.SerializeObject(cardinals, Formatting.Indented);
             File.WriteAllText(path, json);
-        }
-        public static void SaveCardinals(List<CC> cardinals) // Temp
-        {
-            SaveCardinals(GetAssetsPath("cardinal_characteristics.json"), cardinals);
         }
 
 
@@ -67,10 +59,6 @@ namespace JsonHandler
                 return result;
             }
         }
-        public static HashSet<Relation> LoadRelations(List<CC> cardinals) // Temporary, delete when no longer needed
-        {
-            return LoadRelations(GetAssetsPath("relations.json"), cardinals);
-        }
         public static void SaveRelations(String path, HashSet<Relation> relations)
         {
             var simplified = relations.Select(rel => new[] {
@@ -82,10 +70,6 @@ namespace JsonHandler
             }).ToList();
             string json = JsonConvert.SerializeObject(simplified, Formatting.Indented);
             File.WriteAllText(path, json);
-        }
-        public static void SaveRelations(HashSet<Relation> relations) // Again temp
-        {
-            SaveRelations(GetAssetsPath("relations.json"), relations);
         }
 
         private static int RelationTypeToInt(char type)

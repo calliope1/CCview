@@ -251,112 +251,14 @@ namespace CCView
             // Compute closure
             // Note that outside of the command line environment you'll want to specify which files you're loading and unloading each time...
 
-            // ccv
-            Command commandLineCommand = new("ccv", "Old command line behaviour.");
-            rootCommand.Subcommands.Add(commandLineCommand);
-            commandLineCommand.SetAction(pR =>
-            {
-                OldCommandInterface(env, pR.Tokens.Select(t => t.Value).ToArray());
-            });
-
-            //ccn
-            Command newLineCommand = new("ccn", "New command line behaviour.");
-            rootCommand.Subcommands.Add(newLineCommand);
-            //newLineCommand.SetAction(pR => // CHANGE THIS BACK
+            // root command puts us into a command line shell
             rootCommand.SetAction(pR =>
             {
                 var shell = new InteractiveShell(env, rootCommand);
                 shell.Run();
             });
 
-            //rootCommand.SetAction(pR => Console.WriteLine("Default behaviour!")); // FIGURE OUT DEFAULT BEHAVIOUR
-
             return rootCommand.Parse(args).Invoke();
-        }
-
-        internal static string NameFunction(string name)
-        {
-            string v = $"Your name is {name}!" ?? "Why didn't you give me a name";
-            Console.WriteLine(v);
-            return v;
-        }
-
-        internal static int IntFunction(int intOption)
-        {
-            string v = $"Your number was {intOption}!";
-            Console.WriteLine(v);
-            return intOption;
-        }
-
-        public static void OldCommandInterface(RelationEnvironment env, string[] args)
-        {
-            while (true)
-            {
-                Console.Write("> ");
-                string input = Console.ReadLine() ?? "";
-                if (string.IsNullOrWhiteSpace(input))
-                {
-                    continue;
-                }
-
-                string[] tokens = input.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                string command = tokens[0].ToLower();
-                string[] arguments = tokens.Skip(1).ToArray();
-
-                switch (command)
-                {
-                    case "exit":
-                        Console.WriteLine("Exiting...");
-                        return;
-                    case "quit":
-                        Console.WriteLine("Exiting...");
-                        return;
-                    case "help":
-                        Console.WriteLine("exit, help, save");
-                        break;
-                    case "save":
-                        Console.WriteLine("Saving relations and cardinals...");
-                        env.Save();
-                        break;
-                    case "create":
-                        if (arguments.Length < 1)
-                        {
-                            Console.WriteLine("Usage: create <name>");
-                            continue;
-                        }
-                        env.AddCardinal(string.Join(" ", arguments), "X");
-                        break;
-                    case "relate":
-                        if (arguments.Length != 2)
-                        {
-                            Console.WriteLine("Usage: create <id1> <id2>");
-                            continue;
-                        }
-                        // TO DO !!
-                        env.Relations.AddRelationByIds(int.Parse(arguments[0]), int.Parse(arguments[1]), '>');
-                        Console.WriteLine($"Added relation {arguments[0]}>={arguments[1]}.");
-                        break;
-                    case "list":
-                        foreach (CC c in env.Cardinals)
-                        {
-                            Console.WriteLine(c); // CCs have an override to their ToString()
-                        }
-                        break;
-                    case "listrels":
-                        foreach (Relation r in env.Relations.GetRelations())
-                        {
-                            Console.WriteLine($"{r.Item1} >= {r.Item2}.");
-                        }
-                        break;
-                    case "plot":
-                        var dot = GraphLogic.Vis.GraphDrawer.GenerateGraph(env.Relations.GetMinimalRelations(), env.Cardinals);
-                        GraphLogic.Vis.GraphDrawer.WriteDotFile(dot, Program.GetOutputPath(), "relations.dot");
-                        break;
-                    default:
-                        Console.WriteLine("Unknown command. Type 'help' for a list of commands.");
-                        break;
-                }
-            }
         }
 
         public static string GetOutputPath(string filename)

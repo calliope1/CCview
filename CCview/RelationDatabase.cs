@@ -91,12 +91,7 @@ namespace CardinalData
 
         public override int GetHashCode()
         {
-            int hash = 13;
-            hash = hash * 17 + Item1.GetHashCode();
-            hash = hash * 23 + Item2.GetHashCode();
-            hash = hash * 29 + ArticleId.GetHashCode();
-            hash = hash * 31 + Type.GetHashCode();
-            return hash;
+            return HashCode.Combine(Item1, Item2, ArticleId, Type);
         }
 
         public bool IsType(string type)
