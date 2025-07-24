@@ -5,13 +5,14 @@ using System.ComponentModel.Design.Serialization;
 using System.IO;
 using System.Linq;
 using System.Xml.Serialization;
-using CardinalData;
-using CardinalData.Compute;
+using CCView.CardinalData;
+using CCView.CardinalData.Compute;
 using CCView.GraphLogic.Algorithms;
-using CC = CardinalData.CardinalCharacteristic;
+using CC = CCView.CardinalData.CardinalCharacteristic;
+using QuikGraph;
 //using Microsoft.Extensions.ObjectPool;
 
-namespace CardinalData
+namespace CCView.CardinalData
 {
     public class CardinalCharacteristic(int id, string? name, string? symbol)
     {
@@ -44,8 +45,8 @@ namespace CardinalData
 
     public class Article
     {
-        public int Id { get; private set; }
-        public int Year { get; private set; }
+        public int Id { get; private set; } = -1;
+        public int Year { get; private set; } = int.MaxValue;
         public string Name { get; private set; } = "Article name required!";
         public string Citation { get; private set; } = "Citation required!";
         public Article(int id, int year, string name, string citation)
@@ -55,11 +56,6 @@ namespace CardinalData
             Name = name;
             Citation = citation;
         }
-        public Article()
-        {
-            Id = 0;
-            Year = 0;
-        }
     }
 
     public class Relation
@@ -68,7 +64,8 @@ namespace CardinalData
         public CC Item2 { get; set; }
         public Char Type { get; set; }
         public int ArticleId { get; set; } = -1; // -1 is 'no evidence'
-        public int Year { get; set; } = 0; // Should just point to the article's year tbh, lets set up an indexing list for that
+        public int Year { get; set; } = int.MaxValue; // Should just point to the article's year tbh, lets set up an indexing list for that
+        // Max value to be as 'young' as possible, so that relations without evidence are generally discarded in favour of those that have evidence where applicable
         public Relation(CC item1, CC item2, char type, int artId)
         {
             Item1 = item1;
@@ -106,6 +103,10 @@ namespace CardinalData
             }
             return false;
         }
+        public override string ToString()
+        {
+            return $"Relation type {Type} between {Item1} and {Item2} from article id {ArticleId}.";
+        }
     }
     public class Model
     {
@@ -116,13 +117,15 @@ namespace CardinalData
     }
 }
 
-namespace CardinalData.Compute
+namespace CCView.CardinalData.Compute
 {
     public class RelationDatabase
     {
-        public List<CC> Cardinals { get; private set; } = new();
-        private HashSet<Relation> Relations = new();
-        private List<int> CCI { get; set; } = new();
+        public List<CC> Cardinals { get; private set; } = [];
+        private HashSet<Relation> Relations = [];
+        private List<Article> Articles { get; set; } = [];
+        private List<int> CCI { get; set; } = [];
+        private List<int> ArtInds { get; set; } = [];
 
         public RelationDatabase(IEnumerable<CC> cardinals, HashSet<Relation> relations)
         {
@@ -145,16 +148,36 @@ namespace CardinalData.Compute
 
             // Initialise the CCIndex
             // Using this, Cardinals[CCI[i]] will return the CC with Id i
-            List<int> ids = Cardinals.Select(c => c.Id).ToList();
-            int maxId = ids.Max();
-            CCI = [.. Enumerable.Repeat(-1, maxId + 1)]; // This means Enumerable.Repeat(...).ToList();
-            for (int i = 0; i < maxId + 1; i++)
+            CCI = InitIndexList<CC>(Cardinals, c =>c.Id, -1);
+            ArtInds = InitIndexList<Article>(Articles, a => a.Year, -1);
+
+            foreach (Relation r in Relations)
             {
-                CCI[ids[i]] = i;
+                if (r.ArticleId != -1)
+                {
+                    r.Year = Articles[ArtInds[r.ArticleId]].Year;
+                }
             }
+
         }
         public RelationDatabase()
         {
+        }
+        
+        public List<int> InitIndexList<T>(List<T> values, Func<T, int> idFinder, int defaultValue = -1)
+        {
+            if (values.Count == 0)
+            {
+                return [];
+            }
+            List<int> ids = values.Select(v => idFinder(v)).ToList();
+            int maxId = ids.Max();
+            List<int> IndexingList = [.. Enumerable.Repeat(defaultValue, maxId + 1)];
+            for (int i = 0; i < maxId + 1; i++)
+            {
+                IndexingList[ids[i]] = i;
+            }
+            return IndexingList;
         }
         public static HashSet<Relation> ComputeTransitiveClosure(HashSet<Relation> relation)
         {
@@ -323,6 +346,25 @@ namespace CardinalData.Compute
             // Console.WriteLine($"WARNING: List CCI is unaligned with list Cardinals. Please submit a bug report.");
             // Console.WriteLine("Manually calling cardinal.");
             // return Cardinals.SingleOrDefault(c => c.Id == id);
+        }
+        private int RelAge(Relation relation)
+        {
+            return Articles[ArtInds[relation.ArticleId]].Year;
+        }
+    }
+}
+namespace CCView.CardinalData.QGInterface
+{
+    public class RelEdge : Edge<CC>
+    {
+        public Relation Relation { get; }
+        public RelEdge(Relation relation) : base(relation.Item1, relation.Item2)
+        {
+            Relation = relation;
+        }
+        public override string ToString()
+        {
+            return Relation.ToString();
         }
     }
 }

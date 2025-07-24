@@ -6,9 +6,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using CardinalData;
-using CardinalData.Compute;
-using CC = CardinalData.CardinalCharacteristic;
+using CCView.CardinalData;
+using CCView.CardinalData.Compute;
+using CC = CCView.CardinalData.CardinalCharacteristic;
+using QuikGraph.Algorithms;
+using QuikGraph.Algorithms.Search;
+using CCView.CardinalData.QGInterface;
 
 namespace CCView.GraphLogic
 {
@@ -47,9 +50,9 @@ namespace CCView.GraphLogic.Vis
     {
         public static string GenerateGraph(HashSet<Relation> relations, List<CC> cardinals)
         {
-            var graph = new AdjacencyGraph<CC, Edge<CC>>();
+            var graph = new AdjacencyGraph<CC, RelEdge>();
 
-            var algorithm = new GraphvizAlgorithm<CC, Edge<CC>>(graph);
+            var algorithm = new GraphvizAlgorithm<CC, RelEdge>(graph);
 
             algorithm.FormatVertex += (sender, args) =>
             {
@@ -59,22 +62,10 @@ namespace CCView.GraphLogic.Vis
             var (cleanRelations, allVertices) = GraphHandler.CleanRelations(relations, cardinals);
 
             graph.AddVertexRange(allVertices);
+            graph.AddEdgeRange(cleanRelations.Select(r => new RelEdge(r)));
+            GraphvizAlgorithm<CC, RelEdge>  graphviz = new(graph);
 
-            foreach (var rel in cleanRelations)
-            {
-                graph.AddEdge(new Edge<CC>(rel.Item1, rel.Item2));
-            }
-
-            var graphviz = new GraphvizAlgorithm<CC, Edge<CC>>(graph);
-            //{
-            //    graphviz.FormatVertex += (vertex, writer) =>
-            //    {
-            //        writer.WriteAttribute("label", vertex.Name);
-            //        writer.WriteAttribute("shape", "ellipse");
-            //    };
-            //}
-
-            return algorithm.Generate(); // Why does this not have to take graph as an input?
+            return algorithm.Generate();
         }
 
         public static void WriteDotFile(string dot, string outputDotPath, string outputFileName)
@@ -82,8 +73,6 @@ namespace CCView.GraphLogic.Vis
             File.WriteAllText(Path.Combine(outputDotPath, outputFileName), dot);
 
             Console.WriteLine($"DOT file written to {outputDotPath}\"{outputFileName}");
-            //Console.WriteLine("You can render it using Graphviz:");
-            //Console.WriteLine($"> dot -Tpng \"{outputDotPath}\\{outputFileName}\" -o graph.png");
         }
 
         public static void WriteDotFile(string dot, string outputDotPath)
@@ -116,7 +105,7 @@ namespace CCView.GraphLogic.Vis
 
 namespace CCView.GraphLogic.Algorithms
 {
-    public class GraphAlgorithm
+    public static class GraphAlgorithm
     {
         public static HashSet<Relation> GetMinimalRelations(HashSet<Relation> relations, List<CC> desiredCardinals)
         {
@@ -184,21 +173,139 @@ namespace CCView.GraphLogic.Algorithms
         {
             return GetMinimalRelations(rD.GetRelations(), rD.Cardinals);
         }
+        // The whole GetMinMaxRelations routine was made mostly by ChatGPT so I need to go through it and understand it and also agree with it
+        public static HashSet<Relation> GetMinMaxMinimalRelations(HashSet<Relation> relations, List<CC> cardinals)
+        {
+            HashSet<Relation> result = [];
+            Dictionary<int, HashSet<Relation>> AgeDict = [];
+            List<int> AgeList = [];
+            foreach (Relation r in relations)
+            {
+                if (AgeDict.Keys.Contains(r.Year))
+                {
+                    AgeDict[r.Year].Add(r);
+                }
+                else
+                {
+                    AgeList.Add(r.Year);
+                    AgeDict.Add(r.Year, [r]);
+                }
+            }
+            _ = AgeList.Order(); // This means AgeList = AgeList.Order();
+            List<Relation> subRelations = [];
+            foreach (int age in AgeList)
+            {
+                _ = subRelations.Union(AgeDict[age]);
+                // var subGraph = BuildAdjacencyList(cardinals, subRelations);
+                // var reach = ComputeReachability(cardinals, subGraph);
+                AdjacencyGraph<CC, RelEdge> graph = new();
+                HashSet<RelEdge> newEdges = (HashSet<RelEdge>)subRelations.Select(r => new RelEdge(r));
+                graph.AddVertexRange(cardinals);
+                graph.AddEdgeRange(newEdges);
+                TransitiveReductionAlgorithm<CC, RelEdge> algorithm = new(graph);
+                algorithm.Compute();
+                List<Relation> reducedEdges = (List<Relation>)graph.Edges.Select(rE => rE.Relation);
+
+                // var reducedEdges = TransitiveReduction(cardinals, subGraph, reach, subRelations);
+                _ = result.Union(reducedEdges.Intersect(AgeDict[age]));
+            }
+            return result;
+        }
+        public static Dictionary<CC, List<CC>> BuildAdjacencyList(List<CC> cardinals, List<Relation> relations)
+        {
+            Dictionary<CC, List<CC>> adj = cardinals.ToDictionary(c => c, c => new List<CC>());
+            foreach (Relation r in relations)
+            {
+                adj[r.Item1].Add(r.Item2);
+            }
+            return adj;
+        }
+        public static Dictionary<CC, HashSet<CC>> ComputeReachability(List<CC> cardinals, Dictionary<CC, List<CC>> adjacency)
+        {
+            Dictionary<CC, HashSet<CC>> reach = new();
+            foreach (CC c in cardinals)
+            {
+                HashSet<CC> visited = [];
+                // DepthFirstSearchAlgorithm // FIGURE OUT HOW THIS WORKS TOO
+                DFS(c, adjacency, visited);
+                reach[c] = visited;
+            }
+            return reach;
+        }
+        public static void DFS(CC c, Dictionary<CC, List<CC>> adjacency, HashSet<CC> visited)
+        {
+            Stack<CC> stack = new();
+            stack.Push(c);
+            while (stack.Count > 0)
+            {
+                var current = stack.Pop();
+                if (visited.Add(current)) // Don't like this :\
+                {
+                    foreach (CC neighbour in adjacency[current])
+                    {
+                        stack.Push(neighbour);
+                    }
+                }
+            }
+        }
+        public static List<Relation> TransitiveReduction(
+            List<CC> cardinals,
+            Dictionary<CC, List<CC>> adjacency,
+            Dictionary<CC, HashSet<CC>> reach,
+            List<Relation> relations
+            )
+        {
+            List<Relation> reduced = [];
+            foreach (CC c in cardinals)
+            {
+                foreach (CC d in adjacency[c])
+                {
+                    bool redundant = false;
+                    foreach (CC intermediate in adjacency[c])
+                    {
+                        if (!intermediate.Equals(d) && reach[intermediate].Contains(d))
+                        {
+                            redundant = true;
+                            break;
+                        }
+                    }
+                    if (!redundant)
+                    {
+                        reduced.Add(FindOldestRelation(c, d, relations));
+                    }
+                }
+            }
+            return reduced;
+        }
+        public static Relation FindOldestRelation(CC c, CC d, List<Relation> relations)
+        {
+            int minAge = int.MinValue;
+            Relation? result = null;
+            foreach (Relation r in relations)
+            {
+                if (r.Item1.Equals(c) && r.Item2.Equals(d) && r.Year < minAge)
+                {
+                    minAge = r.Year;
+                    result = r;
+                }
+            }
+            if (result != null)
+            {
+                return result;
+            }
+            else
+            {
+                throw new ArgumentException($"No relation between {c} and {d} exists in the provided list.");
+            }
+        }
 
         public static List<Relation> OldestPath(HashSet<Relation> relations, CC c1, CC c2)
         {
-            // TO DO
-            var graph = new AdjacencyGraph<CC, Edge<CC>>();
+            // This is a co-Widest path algorithm, finding the combination of Relations with the least maximum Year.
 
-            // delete the following
+            Console.WriteLine("NOT YET IMPLEMENTED.");
+
             return [];
         }
-
-        //public static HashSet<Relation> GetOldestSpan(HashSet<Relation> relations, List<CC> cardinals)
-        //{
-        //    HashSet<(CC, CC)> pureRels = relations.Select(r => (r.Item1, r.Item2)).ToHashSet();
-        //    // Delete the following line
-        //    return new();
-        //}
     }
 }

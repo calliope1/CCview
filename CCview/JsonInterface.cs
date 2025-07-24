@@ -5,9 +5,9 @@ using System.ComponentModel.Design.Serialization;
 using System.IO;
 using System.Linq;
 using System.Xml.Serialization;
-using CardinalData;
-using CardinalData.Compute;
-using CC = CardinalData.CardinalCharacteristic;
+using CCView.CardinalData;
+using CCView.CardinalData.Compute;
+using CC = CCView.CardinalData.CardinalCharacteristic;
 //using Microsoft.Extensions.ObjectPool;
 
 namespace JsonHandler

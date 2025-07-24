@@ -1,4 +1,14 @@
-﻿// Dependencies
+﻿// Actual feature list to implement pre-web-app:
+// Modified graphs that show lines through based on a particular model
+// Exporting to TikZ
+// Oldest proof that a >= b
+// Implementing the 'a cannot be proved to be >= b' relation (how does this affect use?)
+// Implement an Article and Model hash list like with Cardinals
+// Logic to tell than 'a \ngeqVdash b' (with earliest possible signature)
+// A basic collection of articles, models and cardinals to test with
+// Better command line interface for plotting
+
+// Dependencies
 // These need to be cleaned up at some point
 using Newtonsoft.Json;
 using QuikGraph;
@@ -11,9 +21,9 @@ using System.CommandLine.Parsing;
 using System.IO;
 using System.Linq;
 using static System.Net.WebRequestMethods;
-using CardinalData;
-using CardinalData.Compute;
-using CC = CardinalData.CardinalCharacteristic;
+using CCView.CardinalData;
+using CCView.CardinalData.Compute;
+using CC = CCView.CardinalData.CardinalCharacteristic;
 using CCView.GraphLogic.Vis;
 using JsonHandler;
 using System.Xml.Serialization;
@@ -155,9 +165,6 @@ namespace CCView
                     env.Save();
                 }
             });
-
-            // Add cardinal by symbols
-            // TO DO
 
             // Add relation
             Command relateCommand = new("relate", "Add a relation between two cardinals.")
