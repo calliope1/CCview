@@ -1,27 +1,62 @@
 [
   {
     "Id": 0,
-    "Name": "splitting number",
-    "Symbol": "X"
+    "Name": "bounding number",
+    "SymbolString": "B"
   },
   {
     "Id": 1,
-    "Name": "reaping number",
-    "Symbol": "X"
+    "Name": "dominating number",
+    "SymbolString": "D"
   },
   {
     "Id": 2,
-    "Name": "a",
-    "Symbol": "X"
+    "Name": "Continuum",
+    "SymbolString": "C"
   },
   {
     "Id": 3,
-    "Name": "a",
-    "Symbol": "X"
+    "Name": "cof(N)",
+    "SymbolString": "cof(N)"
   },
   {
     "Id": 4,
-    "Name": "a",
-    "Symbol": "X"
+    "Name": "cof(M)",
+    "SymbolString": "cof(M)"
+  },
+  {
+    "Id": 5,
+    "Name": "non(M)",
+    "SymbolString": "non(M)"
+  },
+  {
+    "Id": 6,
+    "Name": "cov(N)",
+    "SymbolString": "cov(N)"
+  },
+  {
+    "Id": 7,
+    "Name": "non(N)",
+    "SymbolString": "non(N)"
+  },
+  {
+    "Id": 8,
+    "Name": "cov(M)",
+    "SymbolString": "cov(M)"
+  },
+  {
+    "Id": 9,
+    "Name": "add(M)",
+    "SymbolString": "add(M)"
+  },
+  {
+    "Id": 10,
+    "Name": "add(N)",
+    "SymbolString": "add(N)"
+  },
+  {
+    "Id": 11,
+    "Name": "Aleph-1",
+    "SymbolString": "Aleph1"
   }
 ]
