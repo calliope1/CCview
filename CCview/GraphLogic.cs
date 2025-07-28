@@ -41,6 +41,14 @@ namespace CCView.GraphLogic
                 .Distinct();
             return (cleanRelations, allVertices);
         }
+        public static AdjacencyGraph<CC, RelEdge> CCRGraph(IEnumerable<CC> cardinals, IEnumerable<Relation> relations)
+        {
+            AdjacencyGraph<CC, RelEdge> graph = new();
+            var newEdges = relations.Select(r => new RelEdge(r));
+            graph.AddVertexRange(cardinals);
+            graph.AddEdgeRange(newEdges);
+            return graph;
+        }
     }
 }
 
@@ -50,8 +58,8 @@ namespace CCView.GraphLogic.Vis
     {
         public static string GenerateGraph(HashSet<Relation> relations, List<CC> cardinals)
         {
-            var graph = new AdjacencyGraph<CC, RelEdge>();
-
+            var (cleanRelations, allVertices) = GraphHandler.CleanRelations(relations, cardinals);
+            var graph = GraphHandler.CCRGraph(allVertices, cleanRelations);
             var algorithm = new GraphvizAlgorithm<CC, RelEdge>(graph);
 
             algorithm.FormatVertex += (sender, args) =>
@@ -59,10 +67,8 @@ namespace CCView.GraphLogic.Vis
                 args.VertexFormat.Label = args.Vertex.SymbolString;
             };
 
-            var (cleanRelations, allVertices) = GraphHandler.CleanRelations(relations, cardinals);
-
             graph.AddVertexRange(allVertices);
-            graph.AddEdgeRange(cleanRelations.Select(r => new RelEdge(r)));
+            //graph.AddEdgeRange(cleanRelations.Select(r => new RelEdge(r)));
             GraphvizAlgorithm<CC, RelEdge>  graphviz = new(graph);
 
             return algorithm.Generate();
@@ -196,12 +202,10 @@ namespace CCView.GraphLogic.Algorithms
             foreach (int age in AgeList)
             {
                 _ = subRelations.Union(AgeDict[age]);
+                AdjacencyGraph<CC, RelEdge> graph = GraphHandler.CCRGraph(cardinals, subRelations);
                 // var subGraph = BuildAdjacencyList(cardinals, subRelations);
                 // var reach = ComputeReachability(cardinals, subGraph);
-                AdjacencyGraph<CC, RelEdge> graph = new();
-                HashSet<RelEdge> newEdges = (HashSet<RelEdge>)subRelations.Select(r => new RelEdge(r));
-                graph.AddVertexRange(cardinals);
-                graph.AddEdgeRange(newEdges);
+
                 TransitiveReductionAlgorithm<CC, RelEdge> algorithm = new(graph);
                 algorithm.Compute();
                 List<Relation> reducedEdges = (List<Relation>)graph.Edges.Select(rE => rE.Relation);

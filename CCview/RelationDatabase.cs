@@ -10,6 +10,8 @@ using CCView.CardinalData.Compute;
 using CCView.GraphLogic.Algorithms;
 using CC = CCView.CardinalData.CardinalCharacteristic;
 using QuikGraph;
+using JsonHandler;
+using Newtonsoft.Json.Linq;
 //using Microsoft.Extensions.ObjectPool;
 
 namespace CCView.CardinalData
@@ -61,11 +63,14 @@ namespace CCView.CardinalData
     public class Relation
     {
         public CC Item1 { get; set; }
+        public int Item1Id { get; set; } = -1;
         public CC Item2 { get; set; }
+        public int Item2Id { get; set; } = -1;
         public Char Type { get; set; }
         public int ArticleId { get; set; } = -1; // -1 is 'no evidence'
         public int Year { get; set; } = int.MaxValue; // Should just point to the article's year tbh, lets set up an indexing list for that
         // Max value to be as 'young' as possible, so that relations without evidence are generally discarded in favour of those that have evidence where applicable
+        public static List<Char> TypeIndices { get; private set; } = ['>'];
         public Relation(CC item1, CC item2, char type, int artId)
         {
             Item1 = item1;
@@ -110,6 +115,7 @@ namespace CCView.CardinalData
     }
     public class Model
     {
+        public int Id { get; private set; } = -1;
         public int ArticleId { get; set; } = -1;
         public List<HashSet<CC>> CardinalValues { get; set; } = new();
         // The idea with CardinalValues is that each set in the list is an equivalence class by equipotence
@@ -124,8 +130,10 @@ namespace CCView.CardinalData.Compute
         public List<CC> Cardinals { get; private set; } = [];
         private HashSet<Relation> Relations = [];
         private List<Article> Articles { get; set; } = [];
+        private List<Model> Models { get; set; } = [];
         private List<int> CCI { get; set; } = [];
         private List<int> ArtInds { get; set; } = [];
+        private List<int> ModInds { get; set; } = [];
 
         public RelationDatabase(IEnumerable<CC> cardinals, HashSet<Relation> relations)
         {
@@ -149,7 +157,8 @@ namespace CCView.CardinalData.Compute
             // Initialise the CCIndex
             // Using this, Cardinals[CCI[i]] will return the CC with Id i
             CCI = InitIndexList<CC>(Cardinals, c =>c.Id, -1);
-            ArtInds = InitIndexList<Article>(Articles, a => a.Year, -1);
+            ArtInds = InitIndexList<Article>(Articles, a => a.Id, -1);
+            ModInds = InitIndexList<Model>(Models, m => m.Id, -1);
 
             foreach (Relation r in Relations)
             {
@@ -182,7 +191,7 @@ namespace CCView.CardinalData.Compute
         public static HashSet<Relation> ComputeTransitiveClosure(HashSet<Relation> relation)
         {
             HashSet<Relation> newRelation = [.. relation]; // This is short for new HashSet<Relation>(relation);
-            Relation testRelation = new(new CC(-1, "Test"), new CC(-1, "Test"), '>');
+            Relation testRelation = new(new CC(-1, "Test"), new CC(-1, "Test"), '>'); // This is to save memory
             bool changed;
             do
             {
@@ -365,6 +374,61 @@ namespace CCView.CardinalData.QGInterface
         public override string ToString()
         {
             return Relation.ToString();
+        }
+    }
+}
+namespace CCView.CardinalData.JsonSaveable
+{
+    public class CardinalJS : JsonHandler.JsonSaveable
+    {
+        public int Id { get; set; } = -1;
+        public string Name { get; set; } = "No name assigned.";
+        protected override List<string> FieldsToSave => ["Id", "Name"];
+        public CardinalJS(int id, string name)
+        {
+            Id = id;
+            Name = name;
+        }
+        public CardinalJS() { }
+        public static CardinalJS FromJson(string json)
+        {
+            CardinalJS newCT = new();
+            List<JToken> JList = newCT.LoadFromJson(json);
+            newCT.Id = (int)JList[0];
+            newCT.Name = JList[1].ToString();
+            return newCT;
+        }
+    }
+    public class RelationJS : JsonHandler.JsonSaveable
+    {
+        public CardinalJS Item1 { get; set; } = null!;
+        public CardinalJS Item2 { get; set; } = null!;
+        public char Type { get; set; } = 'X';
+        protected override List<String> FieldsToSave => ["Item1.Id", "Item2.Id", "Type"];
+        RelationJS(CardinalJS item1, CardinalJS item2, char type)
+        {
+            Item1 = item1;
+            Item2 = item2;
+            Type = type;
+        }
+        public RelationJS() { }
+        public static RelationJS FromJson(string json, List<CardinalJS> cardinals)
+        {
+            RelationJS newRJ = new();
+            List<JToken> JList = newRJ.LoadFromJson(json);
+            int id1 = (int)JList[0];
+            int id2 = (int)JList[1];
+            var item1 = cardinals[id1];
+            var item2 = cardinals[id2];
+            if (item1.Id != id1 || item2.Id != id2)
+            {
+                // Before public release we'll want to instead throw a warning and then do a manual search
+                throw new ArgumentException("Cardinals list mis-indexed. Cardinal with id i must be at index i.");
+            }
+            newRJ.Item1 = item1;
+            newRJ.Item2 = item2;
+            newRJ.Type = (char)JList[2];
+            return newRJ;
         }
     }
 }

@@ -1,7 +1,6 @@
 ﻿// Actual feature list to implement pre-web-app:
 // Modified graphs that show lines through based on a particular model
 // Exporting to TikZ
-// Oldest proof that a >= b
 // Implementing the 'a cannot be proved to be >= b' relation (how does this affect use?)
 // Implement an Article and Model hash list like with Cardinals
 // Logic to tell than 'a \ngeqVdash b' (with earliest possible signature)
@@ -212,7 +211,6 @@ namespace CCView
             // Save
             Command saveCommand = new("save", "Save the cardinals and relations.");
             rootCommand.Subcommands.Add(saveCommand);
-
             saveCommand.SetAction(pR => env.Save());
 
             //Plot
@@ -350,9 +348,11 @@ namespace CCView
 
         public void Save()
         {
-            JsonInterface.SaveCardinals(CCPath, Relations.Cardinals);
-            JsonInterface.SaveRelations(RelsPath, Relations.GetRelations());
+            JsonInterface.SaveList<CC>(CCPath, Relations.Cardinals);
+            //JsonInterface.SaveRelations(RelsPath, Relations.GetRelations());
             Unsaved = false;
+            // The following is testing the new method
+            JsonInterface.SaveRelations(RelsPath, Relations.GetRelations());
         }
 
         public void AddCardinal(string? name, string? symbol, int id)
