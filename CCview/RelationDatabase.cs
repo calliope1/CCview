@@ -16,18 +16,29 @@ using Newtonsoft.Json.Linq;
 
 namespace CCView.CardinalData
 {
-    public class CardinalCharacteristic(int id, string? name, string? symbol)
+    public class CardinalCharacteristic : JsonHandler.JsonSaveable
     {
-        public int Id { get; private set; } = id;
-        public string Name { get; set; } = name ?? "No name assigned";
-        public string SymbolString { get; set; } = symbol ?? "X";
+        public int Id { get; private set; } = -1;
+        public string Name { get; set; } = "No name assigned";
+        public string SymbolString { get; set; } = "X";
         private int ArtId { get; set; } = -1;
+        protected override List<string> FieldsToSave => ["Id", "Name", "SymbolString"];
 
         [JsonConstructor] // Telling Json.NET to use this constructor
-
-        public CardinalCharacteristic(int id, string name) : this(id, name, "X")
+        [JsonSaveableConstructor] // Telling our system to use this constructor
+        public CardinalCharacteristic(JArray args)
         {
+            Id = args[0].Value<int>();
+            Name = args[1].Value<string>() ?? "No name assigned.";
+            SymbolString = args[2].Value<string>() ?? "X";
         }
+        public CardinalCharacteristic(int id, string name, string symbolString)
+        {
+            Id = id;
+            Name = name;
+            SymbolString = symbolString;
+        }
+        public CardinalCharacteristic() { }
 
         public override bool Equals(object? obj)
         {
@@ -45,12 +56,21 @@ namespace CCView.CardinalData
         }
     }
 
-    public class Article
+    public class Article : JsonHandler.JsonSaveable
     {
         public int Id { get; private set; } = -1;
         public int Year { get; private set; } = int.MaxValue;
         public string Name { get; private set; } = "Article name required!";
         public string Citation { get; private set; } = "Citation required!";
+        protected override List<string> FieldsToSave => ["Id", "Year", "Name", "Citation"];
+        [JsonSaveableConstructor]
+        public Article(JArray args)
+        {
+            Id = args[0].Value<int>();
+            Year = args[1].Value<int>();
+            Name = args[2].Value<string>() ?? "Article name required!";
+            Citation = args[3].Value<string>() ?? "Citation required!";
+        }
         public Article(int id, int year, string name, string citation)
         {
             Id = id;
@@ -60,23 +80,42 @@ namespace CCView.CardinalData
         }
     }
 
-    public class Relation
+    public class Relation : JsonHandler.JsonSaveable
     {
         public CC Item1 { get; set; }
         public int Item1Id { get; set; } = -1;
         public CC Item2 { get; set; }
         public int Item2Id { get; set; } = -1;
         public Char Type { get; set; }
+        public int TypeId { get; set; } = -1;
         public int ArticleId { get; set; } = -1; // -1 is 'no evidence'
         public int Year { get; set; } = int.MaxValue; // Should just point to the article's year tbh, lets set up an indexing list for that
         // Max value to be as 'young' as possible, so that relations without evidence are generally discarded in favour of those that have evidence where applicable
         public static List<Char> TypeIndices { get; private set; } = ['>'];
+        protected override List<string> FieldsToSave => ["Item1.Id", "Item2.Id", "TypeId", "ArticleId"];
+        [JsonSaveableConstructor]
+        public Relation(JArray args, List<CC> cardinals)
+        {
+            Item1Id = args[0].Value<int>();
+            Item2Id = args[1].Value<int>();
+            Item1 = cardinals[Item1Id];
+            Item2 = cardinals[Item2Id];
+            if (Item1.Id != Item1Id || Item2.Id != Item2Id)
+            {
+                // Before public release we'll want to instead throw a warning and then do a manual search
+                throw new ArgumentException("Cardinals list mis-indexed. Cardinal with id i must be at index i.");
+            }
+            TypeId = args[2].Value<int>();
+            Type = Relation.TypeIndices[TypeId];
+            ArticleId = args[3].Value<int>();
+        }
         public Relation(CC item1, CC item2, char type, int artId)
         {
             Item1 = item1;
             Item2 = item2;
             Type = type;
             ArticleId = artId;
+            TypeId = TypeIndices.IndexOf(type);
         }
         public Relation(CC item1, CC item2, char type) : this(item1, item2, type, -1)
         {
@@ -94,19 +133,6 @@ namespace CCView.CardinalData
         public override int GetHashCode()
         {
             return HashCode.Combine(Item1, Item2, ArticleId, Type);
-        }
-
-        public bool IsType(string type)
-        {
-            if (Type.ToString() == type)
-            {
-                return true;
-            }
-            if (type == "ng")
-            {
-                return (Type == 'N');
-            }
-            return false;
         }
         public override string ToString()
         {
@@ -128,7 +154,7 @@ namespace CCView.CardinalData.Compute
     public class RelationDatabase
     {
         public List<CC> Cardinals { get; private set; } = [];
-        private HashSet<Relation> Relations = [];
+        public HashSet<Relation> Relations { get; private set; } = [];
         private List<Article> Articles { get; set; } = [];
         private List<Model> Models { get; set; } = [];
         private List<int> CCI { get; set; } = [];
@@ -191,7 +217,7 @@ namespace CCView.CardinalData.Compute
         public static HashSet<Relation> ComputeTransitiveClosure(HashSet<Relation> relation)
         {
             HashSet<Relation> newRelation = [.. relation]; // This is short for new HashSet<Relation>(relation);
-            Relation testRelation = new(new CC(-1, "Test"), new CC(-1, "Test"), '>'); // This is to save memory
+            Relation testRelation = new(new CC(), new CC(), '>'); // This is to save memory
             bool changed;
             do
             {
@@ -273,7 +299,7 @@ namespace CCView.CardinalData.Compute
             {
                 throw new ArgumentException($"ID {id} is in use by {GetCardinalById(id)}.");
             }
-            var newCardinal = new CC(id, name, symbol);
+            var newCardinal = new CC(id, name!, symbol!);
             if (id >= CCI.Count)
             {
                 CCI.AddRange(Enumerable.Repeat(-1, id + 1 - CCI.Count));

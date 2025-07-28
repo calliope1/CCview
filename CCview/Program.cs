@@ -314,7 +314,8 @@ namespace CCView
             DotPath = Path.Combine(OutDirectory, DotFile);
             GraphPath = Path.Combine(OutDirectory, GraphFile);
 
-            LoadedCardinals = JsonInterface.LoadCardinals(CCPath);
+            //LoadedCardinals = JsonInterface.LoadCardinals(CCPath);
+            LoadedCardinals = JsonInterface.Load<CC>(CCPath);
             LoadedRelations = JsonInterface.LoadRelations(RelsPath, LoadedCardinals);
 
             Relations = new RelationDatabase(LoadedCardinals, LoadedRelations);
@@ -348,11 +349,13 @@ namespace CCView
 
         public void Save()
         {
-            JsonInterface.SaveList<CC>(CCPath, Relations.Cardinals);
+            //JsonInterface.SaveList<CC>(CCPath, Relations.Cardinals);
             //JsonInterface.SaveRelations(RelsPath, Relations.GetRelations());
             Unsaved = false;
             // The following is testing the new method
-            JsonInterface.SaveRelations(RelsPath, Relations.GetRelations());
+            JsonSaveable.Save<CC>(CCPath, Cardinals);
+            JsonSaveable.Save<Relation>(RelsPath, Relations.Relations.ToList());
+            //JsonInterface.SaveRelations(RelsPath, Relations.GetRelations());
         }
 
         public void AddCardinal(string? name, string? symbol, int id)

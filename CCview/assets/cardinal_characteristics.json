@@ -1,62 +1,62 @@
 [
-  {
-    "Id": 0,
-    "Name": "bounding number",
-    "SymbolString": "B"
-  },
-  {
-    "Id": 1,
-    "Name": "dominating number",
-    "SymbolString": "D"
-  },
-  {
-    "Id": 2,
-    "Name": "Continuum",
-    "SymbolString": "C"
-  },
-  {
-    "Id": 3,
-    "Name": "cof(N)",
-    "SymbolString": "cof(N)"
-  },
-  {
-    "Id": 4,
-    "Name": "cof(M)",
-    "SymbolString": "cof(M)"
-  },
-  {
-    "Id": 5,
-    "Name": "non(M)",
-    "SymbolString": "non(M)"
-  },
-  {
-    "Id": 6,
-    "Name": "cov(N)",
-    "SymbolString": "cov(N)"
-  },
-  {
-    "Id": 7,
-    "Name": "non(N)",
-    "SymbolString": "non(N)"
-  },
-  {
-    "Id": 8,
-    "Name": "cov(M)",
-    "SymbolString": "cov(M)"
-  },
-  {
-    "Id": 9,
-    "Name": "add(M)",
-    "SymbolString": "add(M)"
-  },
-  {
-    "Id": 10,
-    "Name": "add(N)",
-    "SymbolString": "add(N)"
-  },
-  {
-    "Id": 11,
-    "Name": "Aleph-1",
-    "SymbolString": "Aleph1"
-  }
+  [
+    0,
+    "bounding number",
+    "B"
+  ],
+  [
+    1,
+    "dominating number",
+    "D"
+  ],
+  [
+    2,
+    "Continuum",
+    "C"
+  ],
+  [
+    3,
+    "cof(N)",
+    "cof(N)"
+  ],
+  [
+    4,
+    "cof(M)",
+    "cof(M)"
+  ],
+  [
+    5,
+    "non(M)",
+    "non(M)"
+  ],
+  [
+    6,
+    "cov(N)",
+    "cov(N)"
+  ],
+  [
+    7,
+    "non(N)",
+    "non(N)"
+  ],
+  [
+    8,
+    "cov(M)",
+    "cov(M)"
+  ],
+  [
+    9,
+    "add(M)",
+    "add(M)"
+  ],
+  [
+    10,
+    "add(N)",
+    "add(N)"
+  ],
+  [
+    11,
+    "Aleph-1",
+    "Aleph1"
+  ]
 ]

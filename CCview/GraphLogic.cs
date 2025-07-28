@@ -115,7 +115,7 @@ namespace CCView.GraphLogic.Algorithms
     {
         public static HashSet<Relation> GetMinimalRelations(HashSet<Relation> relations, List<CC> desiredCardinals)
         {
-            var testRelation = new Relation(new CC(-1, "Test"), new CC(-1, "Test"), '>');
+            var testRelation = new Relation(new CC(), new CC(), '>');
             var minimalRelations = new HashSet<Relation>();
             var minimalCardinals = new HashSet<CC>();
 

@@ -24,14 +24,55 @@ namespace JsonHandler
             var projectRoot = Path.GetFullPath(Path.Combine(baseDir, @"../../../"));
             return Path.Combine(projectRoot, "assets", filename);
         }
-        public static List<CC> LoadCardinals(string path)
+        public static List<JArray> LoadJsonData(string path)
         {
             using (StreamReader r = new(path))
             {
                 string json = r.ReadToEnd();
-                List<CC>? items = JsonConvert.DeserializeObject<List<CC>>(json); // The ? here tells me that it could be null, and that's ok
-                return items ?? [];
+                JArray jArray = JArray.Parse(json);
+                List<JArray> listJArray = [];
+                foreach (var item in jArray)
+                {
+                    if (item is JArray innerArray)
+                    {
+                        listJArray.Add(innerArray);
+                    }
+                    else
+                    {
+                        throw new ArgumentException($"Non-array data in {path}.");
+                    }
+                }
+                return listJArray;
             }
+        }
+        public static List<T> Load<T>(string path) where T : JsonSaveable
+        {
+            List<JArray> data = LoadJsonData(path);
+            List<T> values = [];
+            var constructor = typeof(T).GetConstructors().FirstOrDefault(c =>
+                c.GetCustomAttributes(typeof(JsonSaveableConstructor), false).Length != 0);
+            foreach (JArray item in data)
+            {
+                if (constructor != null)
+                {
+                    values.Add((T)constructor.Invoke([item]));
+                }
+                else
+                {
+                    throw new ArgumentException($"No JsonSaveableConstructor found for class {typeof(T)}.");
+                }
+            }
+            return values;
+        }
+        public static List<CC> LoadCardinals(string path)
+        {
+            List<JArray> data = LoadJsonData(path);
+            List<CC> unsortedCCs = [];
+            foreach (var item in data)
+            {
+                unsortedCCs.Add(new CC(item));
+            }
+            return unsortedCCs;
         }
         public static string SaveList<T>(String path, List<T> list)
         {
@@ -89,13 +130,15 @@ namespace JsonHandler
 
         private static int RelationTypeToInt(char type)
         {
-            return Relation.TypeIndices.First(t => t == type);
+            return Relation.TypeIndices.IndexOf(type);
         }
         private static char IntToRelationType(int type)
         {
             if (type >= Relation.TypeIndices.Count)
             {
-                throw new ArgumentException($"{type} is not a valid relation type id.");
+                Console.WriteLine($"{type} is not a valid relation type id.");
+                return Relation.TypeIndices[0];
+                //throw new ArgumentException($"{type} is not a valid relation type id.");
             }
             return Relation.TypeIndices[type];
         }
@@ -191,9 +234,11 @@ namespace JsonHandler
         //}
         public static string Save<T>(string path, IEnumerable<T> list) where T : JsonSaveable
         {
-            string json = JsonConvert.SerializeObject(list.Select(item => item.TurnToJson()));
+            string json = JsonConvert.SerializeObject(list.Select(item => item.TurnToJson()), Formatting.Indented);
             File.WriteAllText(path, json);
             return json;
         }
     }
+    [AttributeUsage(AttributeTargets.Constructor, Inherited = false)]
+    public class JsonSaveableConstructor : Attribute { }
 }
