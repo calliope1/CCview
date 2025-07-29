@@ -6,37 +6,28 @@
 // Logic to tell than 'a \ngeqVdash b' (with earliest possible signature)
 // A basic collection of articles, models and cardinals to test with
 // Better command line interface for plotting
+// Change (Relations, Cardinals) to (Cardinals, Relations) in functions
+// MAYBE Change Relations to a List rather than a HashSet
 
 // Dependencies
 // These need to be cleaned up at some point
-using Newtonsoft.Json;
-using QuikGraph;
-using QuikGraph.Graphviz;
-using System;
-using System.Collections.Generic;
+
 using System.CommandLine;
-using System.CommandLine.Invocation;
-using System.CommandLine.Parsing;
-using System.IO;
-using System.Linq;
-using static System.Net.WebRequestMethods;
 using CCView.CardinalData;
 using CCView.CardinalData.Compute;
 using CC = CCView.CardinalData.CardinalCharacteristic;
-using CCView.GraphLogic.Vis;
-using JsonHandler;
-using System.Xml.Serialization;
+using CCView.JsonHandler;
 
 namespace CCView
 {
     public class Program
     {
+        public static bool _loadLog { get; private set;  } = true;
         public static bool ShouldExit { get; private set; } = false;
         static int Main(string[] args)
         {
             // For now we assume that we are only ever working with one set of files: cardinal_characteristics.json and relations.json
             var Env = new RelationEnvironment();
-
             return Run(Env, args);
         }
 
@@ -178,6 +169,12 @@ namespace CCView
                 int[] ids = pR.GetValue(idsArgument)!; // ! here is the null-forgiving operator, which is okay because we know that it is never null
                 char type = pR.GetValue(typeOption);
                 env.RelateCardinals(ids[0], ids[1], type);
+                if (Program._loadLog)
+                {
+                    var c1 = env.Relations.GetCardinalById(ids[0]);
+                    var c2 = env.Relations.GetCardinalById(ids[1]);
+                    Console.WriteLine($"Cardinals {c1} and {c2} related with type '>' relation.");
+                }
             });
 
             // Add relation by symbol string
@@ -197,6 +194,10 @@ namespace CCView
                 CC Item1 = env.Relations.GetCardinalBySymbol(symbols[0]);
                 CC Item2 = env.Relations.GetCardinalBySymbol(symbols[1]);
                 env.RelateCardinals(Item1.Id, Item2.Id, type);
+                if (Program._loadLog)
+                {
+                    Console.WriteLine($"Cardinals {Item1} and {Item2} related with type '>' relation.");
+                }
             });
 
             // Compute transitive closure
@@ -259,7 +260,19 @@ namespace CCView
             // root command puts us into a command line shell
             rootCommand.SetAction(pR =>
             {
+                if (Program._loadLog)
+                {
+                    Console.WriteLine("Creating Interactive Shell.");
+                }
                 var shell = new InteractiveShell(env, rootCommand);
+                if (Program._loadLog)
+                {
+                    Console.WriteLine("Interactive Shell created.");
+                }
+                if (Program._loadLog)
+                {
+                    Console.WriteLine("Loading complete.");
+                }
                 shell.Run();
             });
 
@@ -300,6 +313,10 @@ namespace CCView
 
         public RelationEnvironment(string ccFile, string relsFile, string dotFile, string graphFile)
         {
+            if (Program._loadLog)
+            {
+                Console.WriteLine("Loading Relation Environment.");
+            }
             BaseDirectory = AppContext.BaseDirectory;
             LoadDirectory = Path.GetFullPath(Path.Combine(BaseDirectory, @"../../../assets/"));
             OutDirectory = Path.GetFullPath(Path.Combine(BaseDirectory, @"../../../output/"));
@@ -315,10 +332,25 @@ namespace CCView
             GraphPath = Path.Combine(OutDirectory, GraphFile);
 
             //LoadedCardinals = JsonInterface.LoadCardinals(CCPath);
-            LoadedCardinals = JsonInterface.Load<CC>(CCPath);
-            LoadedRelations = JsonInterface.LoadRelations(RelsPath, LoadedCardinals);
-
+            if (Program._loadLog)
+            {
+                Console.WriteLine("Loading cardinals.");
+            }
+            LoadedCardinals = JsonFileHandler.Load<CC>(CCPath);
+            if (Program._loadLog)
+            {
+                Console.WriteLine("Loading relations.");
+            }
+            LoadedRelations = JsonFileHandler.LoadRelations(RelsPath, LoadedCardinals).ToHashSet();
+            if (Program._loadLog)
+            {
+                Console.WriteLine("Creating Relation Database environment.");
+            }
             Relations = new RelationDatabase(LoadedCardinals, LoadedRelations);
+            if (Program._loadLog)
+            {
+                Console.WriteLine("Relation Environment complete.");
+            }
         }
 
         public RelationEnvironment() : this("cardinal_characteristics", "relations", "relations", "graph")
@@ -349,13 +381,17 @@ namespace CCView
 
         public void Save()
         {
-            //JsonInterface.SaveList<CC>(CCPath, Relations.Cardinals);
-            //JsonInterface.SaveRelations(RelsPath, Relations.GetRelations());
             Unsaved = false;
-            // The following is testing the new method
-            JsonSaveable.Save<CC>(CCPath, Cardinals);
-            JsonSaveable.Save<Relation>(RelsPath, Relations.Relations.ToList());
-            //JsonInterface.SaveRelations(RelsPath, Relations.GetRelations());
+            JsonFileHandler.Save<CC>(CCPath, Cardinals);
+            if (Program._loadLog)
+            {
+                Console.WriteLine($"Cardinals saved to {CCPath}.");
+            }
+            JsonFileHandler.Save<Relation>(RelsPath, Relations.Relations.ToList());
+            if (Program._loadLog)
+            {
+                Console.WriteLine($"Relations saved to {RelsPath}.");
+            }
         }
 
         public void AddCardinal(string? name, string? symbol, int id)

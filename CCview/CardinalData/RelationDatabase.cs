@@ -1,22 +1,13 @@
 ﻿using Newtonsoft.Json;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.Design.Serialization;
-using System.IO;
-using System.Linq;
-using System.Xml.Serialization;
-using CCView.CardinalData;
-using CCView.CardinalData.Compute;
 using CCView.GraphLogic.Algorithms;
 using CC = CCView.CardinalData.CardinalCharacteristic;
 using QuikGraph;
-using JsonHandler;
 using Newtonsoft.Json.Linq;
-//using Microsoft.Extensions.ObjectPool;
+using CCView.JsonHandler;
 
 namespace CCView.CardinalData
 {
-    public class CardinalCharacteristic : JsonHandler.JsonSaveable
+    public class CardinalCharacteristic : JsonCRTP<CardinalCharacteristic>
     {
         public int Id { get; private set; } = -1;
         public string Name { get; set; } = "No name assigned";
@@ -25,8 +16,14 @@ namespace CCView.CardinalData
         protected override List<string> FieldsToSave => ["Id", "Name", "SymbolString"];
 
         [JsonConstructor] // Telling Json.NET to use this constructor
-        [JsonSaveableConstructor] // Telling our system to use this constructor
+        //[JsonSaveableConstructor] // Telling our system to use this constructor
         public CardinalCharacteristic(JArray args)
+        {
+            Id = args[0].Value<int>();
+            Name = args[1].Value<string>() ?? "No name assigned.";
+            SymbolString = args[2].Value<string>() ?? "X";
+        }
+        public override void InstantiateFromJArray(JArray args)
         {
             Id = args[0].Value<int>();
             Name = args[1].Value<string>() ?? "No name assigned.";
@@ -56,15 +53,22 @@ namespace CCView.CardinalData
         }
     }
 
-    public class Article : JsonHandler.JsonSaveable
+    public class Article : JsonHandler.JsonCRTP<Article>
     {
         public int Id { get; private set; } = -1;
         public int Year { get; private set; } = int.MaxValue;
         public string Name { get; private set; } = "Article name required!";
         public string Citation { get; private set; } = "Citation required!";
         protected override List<string> FieldsToSave => ["Id", "Year", "Name", "Citation"];
-        [JsonSaveableConstructor]
+        //[JsonSaveableConstructor]
         public Article(JArray args)
+        {
+            Id = args[0].Value<int>();
+            Year = args[1].Value<int>();
+            Name = args[2].Value<string>() ?? "Article name required!";
+            Citation = args[3].Value<string>() ?? "Citation required!";
+        }
+        public override void InstantiateFromJArray(JArray args)
         {
             Id = args[0].Value<int>();
             Year = args[1].Value<int>();
@@ -80,7 +84,7 @@ namespace CCView.CardinalData
         }
     }
 
-    public class Relation : JsonHandler.JsonSaveable
+    public class Relation : JsonHandler.JsonCRTP<Relation>
     {
         public CC Item1 { get; set; }
         public int Item1Id { get; set; } = -1;
@@ -93,7 +97,7 @@ namespace CCView.CardinalData
         // Max value to be as 'young' as possible, so that relations without evidence are generally discarded in favour of those that have evidence where applicable
         public static List<Char> TypeIndices { get; private set; } = ['>'];
         protected override List<string> FieldsToSave => ["Item1.Id", "Item2.Id", "TypeId", "ArticleId"];
-        [JsonSaveableConstructor]
+        //[JsonSaveableConstructor]
         public Relation(JArray args, List<CC> cardinals)
         {
             Item1Id = args[0].Value<int>();
@@ -105,6 +109,21 @@ namespace CCView.CardinalData
                 // Before public release we'll want to instead throw a warning and then do a manual search
                 throw new ArgumentException("Cardinals list mis-indexed. Cardinal with id i must be at index i.");
             }
+            TypeId = args[2].Value<int>();
+            Type = Relation.TypeIndices[TypeId];
+            ArticleId = args[3].Value<int>();
+        }
+        public Relation() { Item1 = new(); Item2 = new(); }
+        public override void InstantiateFromJArray(JArray args)
+        {
+            //Console.WriteLine("WARNING: You are calling Relation.InstantiateFromJArray. This will not correctly instantiate the Item1 or Item2 variables.");
+            Item1Id = args[0].Value<int>();
+            Item2Id = args[1].Value<int>();
+            //if (Item1.Id != Item1Id || Item2.Id != Item2Id)
+            //{
+            //    // Before public release we'll want to instead throw a warning and then do a manual search
+            //    throw new ArgumentException("Cardinals list mis-indexed. Cardinal with id i must be at index i.");
+            //}
             TypeId = args[2].Value<int>();
             Type = Relation.TypeIndices[TypeId];
             ArticleId = args[3].Value<int>();
@@ -139,13 +158,18 @@ namespace CCView.CardinalData
             return $"Relation type {Type} between {Item1} and {Item2} from article id {ArticleId}.";
         }
     }
-    public class Model
+    public class Model : JsonCRTP<Model>
     {
         public int Id { get; private set; } = -1;
         public int ArticleId { get; set; } = -1;
         public List<HashSet<CC>> CardinalValues { get; set; } = new();
         // The idea with CardinalValues is that each set in the list is an equivalence class by equipotence
         // Then if one set comes before another, the cardinals in the first set are less than those in the second
+        protected override List<string> FieldsToSave => ["Id", "ArticleId"];
+        public override void InstantiateFromJArray(JArray jsonData)
+        {
+            throw new NotImplementedException();
+        }
     }
 }
 
@@ -199,16 +223,16 @@ namespace CCView.CardinalData.Compute
         {
         }
         
-        public List<int> InitIndexList<T>(List<T> values, Func<T, int> idFinder, int defaultValue = -1)
+        public static List<int> InitIndexList<T>(List<T> values, Func<T, int> idFinder, int defaultValue = -1)
         {
             if (values.Count == 0)
             {
                 return [];
             }
-            List<int> ids = values.Select(v => idFinder(v)).ToList();
+            List<int> ids = [.. values.Select(v => idFinder(v))];
             int maxId = ids.Max();
             List<int> IndexingList = [.. Enumerable.Repeat(defaultValue, maxId + 1)];
-            for (int i = 0; i < maxId + 1; i++)
+            for (int i = 0; i < ids.Count; i++)
             {
                 IndexingList[ids[i]] = i;
             }
@@ -245,6 +269,7 @@ namespace CCView.CardinalData.Compute
         }
         public void TransClose()
         {
+            throw new NotImplementedException();
             HashSet<Relation> newRels = ComputeTransitiveClosure(Relations);
             Relations = newRels;
         }
@@ -388,6 +413,7 @@ namespace CCView.CardinalData.Compute
         }
     }
 }
+// Should this be moved to GraphLogic?
 namespace CCView.CardinalData.QGInterface
 {
     public class RelEdge : Edge<CC>
@@ -400,61 +426,6 @@ namespace CCView.CardinalData.QGInterface
         public override string ToString()
         {
             return Relation.ToString();
-        }
-    }
-}
-namespace CCView.CardinalData.JsonSaveable
-{
-    public class CardinalJS : JsonHandler.JsonSaveable
-    {
-        public int Id { get; set; } = -1;
-        public string Name { get; set; } = "No name assigned.";
-        protected override List<string> FieldsToSave => ["Id", "Name"];
-        public CardinalJS(int id, string name)
-        {
-            Id = id;
-            Name = name;
-        }
-        public CardinalJS() { }
-        public static CardinalJS FromJson(string json)
-        {
-            CardinalJS newCT = new();
-            List<JToken> JList = newCT.LoadFromJson(json);
-            newCT.Id = (int)JList[0];
-            newCT.Name = JList[1].ToString();
-            return newCT;
-        }
-    }
-    public class RelationJS : JsonHandler.JsonSaveable
-    {
-        public CardinalJS Item1 { get; set; } = null!;
-        public CardinalJS Item2 { get; set; } = null!;
-        public char Type { get; set; } = 'X';
-        protected override List<String> FieldsToSave => ["Item1.Id", "Item2.Id", "Type"];
-        RelationJS(CardinalJS item1, CardinalJS item2, char type)
-        {
-            Item1 = item1;
-            Item2 = item2;
-            Type = type;
-        }
-        public RelationJS() { }
-        public static RelationJS FromJson(string json, List<CardinalJS> cardinals)
-        {
-            RelationJS newRJ = new();
-            List<JToken> JList = newRJ.LoadFromJson(json);
-            int id1 = (int)JList[0];
-            int id2 = (int)JList[1];
-            var item1 = cardinals[id1];
-            var item2 = cardinals[id2];
-            if (item1.Id != id1 || item2.Id != id2)
-            {
-                // Before public release we'll want to instead throw a warning and then do a manual search
-                throw new ArgumentException("Cardinals list mis-indexed. Cardinal with id i must be at index i.");
-            }
-            newRJ.Item1 = item1;
-            newRJ.Item2 = item2;
-            newRJ.Type = (char)JList[2];
-            return newRJ;
         }
     }
 }

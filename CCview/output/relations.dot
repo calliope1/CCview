@@ -11,6 +11,8 @@ digraph G {
 9 [label="add(M)"];
 10 [label="add(N)"];
 11 [label="Aleph1"];
+12 [label="ADULT"];
+13 [label="BABY"];
 0 -> 1;
 1 -> 2;
 1 -> 3;
@@ -26,4 +28,5 @@ digraph G {
 8 -> 9;
 9 -> 10;
 10 -> 11;
+12 -> 13;
 }

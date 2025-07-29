@@ -1,16 +1,9 @@
 ﻿using QuikGraph;
 using QuikGraph.Graphviz;
-
-using Newtonsoft.Json;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using CCView.CardinalData;
 using CCView.CardinalData.Compute;
 using CC = CCView.CardinalData.CardinalCharacteristic;
 using QuikGraph.Algorithms;
-using QuikGraph.Algorithms.Search;
 using CCView.CardinalData.QGInterface;
 
 namespace CCView.GraphLogic
