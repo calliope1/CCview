@@ -7,7 +7,6 @@
 // A basic collection of articles, models and cardinals to test with
 // Better command line interface for plotting
 // Change (Relations, Cardinals) to (Cardinals, Relations) in functions
-// MAYBE Change Relations to a List rather than a HashSet
 
 // Dependencies
 // These need to be cleaned up at some point
