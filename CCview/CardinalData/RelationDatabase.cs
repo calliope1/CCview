@@ -16,7 +16,6 @@ namespace CCView.CardinalData
         protected override List<string> FieldsToSave => ["Id", "Name", "SymbolString"];
 
         [JsonConstructor] // Telling Json.NET to use this constructor
-        //[JsonSaveableConstructor] // Telling our system to use this constructor
         public CardinalCharacteristic(JArray args)
         {
             Id = args[0].Value<int>();
@@ -82,7 +81,28 @@ namespace CCView.CardinalData
             Name = name;
             Citation = citation;
         }
+        public override bool Equals(object? obj)
+        {
+            return obj is Article other && other.Id == Id;
+        }
+        public override int GetHashCode()
+        {
+            return Id.GetHashCode();
+        }
+        public override string ToString()
+        {
+            return $"Article {Name} (ID: {Id}).";
+        }
     }
+
+    // To-do list regarding the 'N' type relations:
+    // // Transitive closure: Con(a > b) && b \geq c => Con(a > c)
+    // // 'IsDerived' status in relations, with an associate List<Relation> showing their working out
+    // // Maybe we have two dictionaries: CCStatus Dictionary<(CC, CC), Char> so that CCStatus[(a, b)] = 'X' iff there is a relation of type 'X',
+    // // // and CCWitnesses Dictionary<(CC, CC), HashSet<Relation>> so that CCStatus[(a, b)] is all the relations between a and b.
+    // // // We would need to figure out a strict hierarchy for relation types, but that should be possible with the relations in mind (i.e. =, >, N, =suc, etc)
+    // // // This saves repeatedly asking about adjacency and possibly even saves memory.
+    // // // We should also store the dictionaries I suppose. Should we give Relations ids?
 
     public class Relation : JsonHandler.JsonCRTP<Relation>
     {
@@ -95,7 +115,9 @@ namespace CCView.CardinalData
         public int ArticleId { get; set; } = -1; // -1 is 'no evidence'
         public int Year { get; set; } = int.MaxValue; // Should just point to the article's year tbh, lets set up an indexing list for that
         // Max value to be as 'young' as possible, so that relations without evidence are generally discarded in favour of those that have evidence where applicable
-        public static List<Char> TypeIndices { get; private set; } = ['>'];
+        public static List<Char> TypeIndices { get; private set; } = ['>','C'];
+        // '>' refers to ZFC \vdash Item1 \geq Item2
+        // 'C' refers to Con(ZFC + Item1 > Item2). That is, Item2 \geq Item1 is unprovable
         protected override List<string> FieldsToSave => ["Item1.Id", "Item2.Id", "TypeId", "ArticleId"];
         //[JsonSaveableConstructor]
         public Relation(JArray args, List<CC> cardinals)
@@ -155,20 +177,34 @@ namespace CCView.CardinalData
         }
         public override string ToString()
         {
-            return $"Relation type {Type} between {Item1} and {Item2} from article id {ArticleId}.";
+            return ArticleId != -1
+                ? $"Relation type {Type} between {Item1} and {Item2} from article id {ArticleId}"
+                : $"Relation type {Type} between {Item1} and {Item2}";
         }
     }
     public class Model : JsonCRTP<Model>
     {
         public int Id { get; private set; } = -1;
         public int ArticleId { get; set; } = -1;
-        public List<HashSet<CC>> CardinalValues { get; set; } = new();
+        public List<HashSet<CC>> CardinalValues { get; set; } = [];
         // The idea with CardinalValues is that each set in the list is an equivalence class by equipotence
         // Then if one set comes before another, the cardinals in the first set are less than those in the second
         protected override List<string> FieldsToSave => ["Id", "ArticleId"];
         public override void InstantiateFromJArray(JArray jsonData)
         {
             throw new NotImplementedException();
+        }
+        public override bool Equals(object? obj)
+        {
+            return obj is Model other && other.Id == Id;
+        }
+        public override int GetHashCode()
+        {
+            return Id.GetHashCode();
+        }
+        public override string ToString()
+        {
+            return $"Model ID {Id} from Article ID {ArticleId}";
         }
     }
 }
@@ -184,6 +220,8 @@ namespace CCView.CardinalData.Compute
         private List<int> CCI { get; set; } = [];
         private List<int> ArtInds { get; set; } = [];
         private List<int> ModInds { get; set; } = [];
+        public Dictionary<(CC, CC), HashSet<CC>> Density { get; private set; } = [];
+        private bool DynamicDensity { get; set; } = false;
 
         public RelationDatabase(IEnumerable<CC> cardinals, HashSet<Relation> relations)
         {
@@ -197,12 +235,6 @@ namespace CCView.CardinalData.Compute
                 if (!Cardinals.Contains(relation.Item2))
                     Cardinals.Add(relation.Item2);
             }
-
-            // Reflexivity (not really needed)
-            //foreach (var cardinal in Cardinals)
-            //{
-            //    Relations.Add(new Relation(cardinal, cardinal, '>'));
-            //}
 
             // Initialise the CCIndex
             // Using this, Cardinals[CCI[i]] will return the CC with Id i
@@ -238,40 +270,103 @@ namespace CCView.CardinalData.Compute
             }
             return IndexingList;
         }
-        public static HashSet<Relation> ComputeTransitiveClosure(HashSet<Relation> relation)
+        public bool PopulateDensity()
         {
-            HashSet<Relation> newRelation = [.. relation]; // This is short for new HashSet<Relation>(relation);
+            if (DynamicDensity) Program.LoadLog("In-betweenness relation already instantiated.");
+            else
+            {
+                Program.LoadLog("Computing in-betweenness relation for cardinal characteristics.");
+                Program.LoadLog("First computing transitive closure.");
+                int n = TransClose();
+                foreach (Relation r1 in Relations)
+                {
+                    foreach (Relation r2 in Relations)
+                    {
+                        if (r1.Item2.Equals(r2.Item1) && r1.Type == '>' && r2.Type == '>')
+                        {
+                            if (Density.TryGetValue((r1.Item1, r2.Item2), out HashSet<CC>? between))
+                            {
+                                between.Add(r1.Item2);
+                            }
+                            else
+                            {
+                                Density[(r1.Item1, r2.Item2)] = [r1.Item2];
+                            }
+                        }
+                    }
+                }
+                Program.LoadLog("In-betweenness relation computed.");
+                Program.LoadLog("The in-betweenness relation will continue to compute as the database is modified. This will also automatically maintain transitive closure.");
+                DynamicDensity = true;
+                return n > 0;
+            }
+            return false;
+        }
+        public static HashSet<Relation> ComputeTransitiveClosure(IEnumerable<Relation> relation)
+        {
+            HashSet<Relation> newRelations = [.. relation]; // This is short for new HashSet<Relation>(relation);
             Relation testRelation = new(new CC(), new CC(), '>'); // This is to save memory
             bool changed;
             do
             {
                 changed = false;
-
-                foreach (var relOne in newRelation)
+                HashSet<Relation> newRelationsToAdd = [];
+                foreach (var relOne in newRelations)
                 {
-                    foreach (var relTwo in newRelation)
+                    foreach (var relTwo in newRelations)
                     {
-                        if (!(relOne.Type == '>' && relTwo.Type == '>')) continue;
-                        testRelation.Item1 = relOne.Item1;
-                        testRelation.Item2 = relTwo.Item2;
-                        testRelation.Type = relOne.Type; // Trying to save memory
-                        if (relOne.Item2.Equals(relTwo.Item1)
-                            && !newRelation.Contains(testRelation)
-                            && !relOne.Item1.Equals(relTwo.Item2))
+                        // a C b > c implies a C c
+                        // a > b > c implies a > c
+                        // a C b > a is impossible
+                        if (relOne.Type == 'C' && relTwo.Type == '>')
                         {
-                            newRelation.Add(new Relation(relOne.Item1, relTwo.Item2, relOne.Type));
-                            changed = true;
+                            if (relOne.Item2.Equals(relTwo.Item1)) throw new DataMisalignedException($"Relations {relOne} and {relTwo} are incompatible.");
+                        }
+                        else if (relOne.Type == 'C' && relTwo.Type == '>')
+                        {
+                            if (relOne.Item2.Equals(relTwo.Item1))
+                            {
+                                testRelation.Item1 = relOne.Item1;
+                                testRelation.Item2 = relTwo.Item2;
+                                testRelation.Type = 'C';
+                                if (!newRelations.Contains(testRelation))
+                                {
+                                    newRelationsToAdd.Add(new Relation(relOne.Item1, relTwo.Item2, 'C'));
+                                    changed = true;
+                                }
+                            }
+                        }
+                        else if (relOne.Type == '>' && relTwo.Type == '>')
+                        {
+                            testRelation.Item1 = relOne.Item1;
+                            testRelation.Item2 = relTwo.Item2;
+                            testRelation.Type = '>';
+                            if (relOne.Item2.Equals(relTwo.Item1)
+                                && !newRelations.Contains(testRelation)
+                                && !relOne.Item1.Equals(relTwo.Item2))
+                            {
+                                newRelationsToAdd.Add(new Relation(relOne.Item1, relTwo.Item2, relOne.Type));
+                                changed = true;
+                            }
                         }
                     }
                 }
+                foreach (var r in newRelationsToAdd)
+                {
+                    newRelations.Add(r);
+                }
             } while (changed);
-            return newRelation;
+            return newRelations;
         }
-        public void TransClose()
+        public int TransClose()
         {
-            throw new NotImplementedException();
-            HashSet<Relation> newRels = ComputeTransitiveClosure(Relations);
-            Relations = newRels;
+            //throw new NotImplementedException();
+            Console.WriteLine("HEY! Use TransitiveClosureAlgorithm from QuikGraph (if that works).");
+            int n = Relations.Count();
+            Relations = ComputeTransitiveClosure(Relations);
+            int m = Relations.Count();
+            Program.LoadLog($"Constructed {m - n} new relations in transitive closure.");
+            return m - n;
         }
 
         public void AddRelation(CC? a, CC? b, char type, bool lazy = true)
@@ -284,21 +379,54 @@ namespace CCView.CardinalData.Compute
             {
                 throw new ArgumentException("Both cardinals must be part of the relations.");
             }
-
-            var toAdd = new HashSet<Relation> {
-            //new Relation(a, a, '>'),
-            //new Relation(b, b, '>'), // I don't think we need to enforce reflexivity
-            new Relation(a, b, type)
-            };
-
-            foreach (var rel in toAdd)
+            HashSet<Relation> toAdd = [new(a, b, type)];
+            if (type == '>' && DynamicDensity)
             {
-                Relations.Add(rel);
+                List<CC> intoA = [];
+                List<CC> outOfB = [];
+                // In this case we may assume that Relations is already transitive
+                foreach (Relation r in Relations)
+                {
+                    if (r.Type == '>')
+                    {
+                        if (r.Item2.Equals(a))
+                        {
+                            intoA.Add(r.Item1);
+                            toAdd.Add(new(r.Item1, b, '>'));
+                        }
+                        else if (r.Item1.Equals(b))
+                        {
+                            outOfB.Add(r.Item2);
+                            toAdd.Add(new(a, r.Item2, '>'));
+                        }
+                    }
+                }
+                foreach (CC cIn in intoA)
+                {
+                    foreach (CC cOut in outOfB)
+                    {
+                        toAdd.Add(new(cIn, cOut, '>'));
+                    }
+                }
+                foreach (var rel in toAdd)
+                {
+                    Relations.Add(rel);
+                }
             }
-
-            if (!lazy)
+            else if (!lazy)
             {
+                foreach (var rel in toAdd)
+                {
+                    Relations.Add(rel);
+                }
                 Relations = ComputeTransitiveClosure(Relations);
+            }
+            else
+            {
+                foreach (var rel in toAdd)
+                {
+                    Relations.Add(rel);
+                }
             }
         }
         public int NewId(bool fast = false)
@@ -331,7 +459,6 @@ namespace CCView.CardinalData.Compute
             }
             CCI[id] = Cardinals.Count; // It's important to do this before adding the cardinal
             Cardinals.Add(newCardinal);
-            //Relations.Add(new Relation(newCardinal, newCardinal, '>')); // Reflexivity
             Console.WriteLine($"Added new cardinal: {newCardinal}");
         }
         public void AddCardinal(string? name, string? symbol, bool fast = false)
@@ -342,20 +469,12 @@ namespace CCView.CardinalData.Compute
         {
             return Relations.Contains(new Relation(a, b, type));
         }
-        public HashSet<Relation> GetRelations()
-        {
-            return Relations;
-        }
         public HashSet<Relation> GetMinimalRelations(List<CC> desiredCardinals)
         {
-            return GraphAlgorithm.GetMinimalRelations(Relations, desiredCardinals);
+            return DynamicDensity // : ? is a ternary relation. P : A ? B means "IF P THEN A ELSE B".
+                ? GraphAlgorithm.DensityTransitiveReduction(desiredCardinals, Relations, Density)
+                : GraphAlgorithm.TransitiveReduction(desiredCardinals, Relations);
         }
-
-        public HashSet<Relation> GetMinimalRelations()
-        {
-            return GetMinimalRelations(Cardinals);
-        }
-
         public CC? GetCardinalById(int id)
         {
             CC? match = Cardinals[CCI[id]];
@@ -376,11 +495,9 @@ namespace CCView.CardinalData.Compute
         public CC GetCardinalByIdOrThrow(int id)
         {
             CC? match = GetCardinalById(id);
-            if (match == null)
-            {
-                throw new ArgumentException($"Id {id} does not belong to a cardinal characteristic.");
-            }
-            return match;
+            return match == null
+                ? throw new ArgumentException($"Id {id} does not belong to a cardinal characteristic.")
+                : match;
         }
 
         public void AddRelationByIds(int id1, int id2, char type)

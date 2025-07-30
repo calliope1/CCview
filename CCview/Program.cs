@@ -21,7 +21,7 @@ namespace CCView
 {
     public class Program
     {
-        public static bool _loadLog { get; private set;  } = true;
+        private static readonly bool _loadLog = true;
         public static bool ShouldExit { get; private set; } = false;
         static int Main(string[] args)
         {
@@ -64,6 +64,13 @@ namespace CCView
             // ///////////// //
 
             // Options //
+            Option<bool> fromShellOption = new("--fromShell")
+            {
+                Description = "Internal-only option to indicate to the programme that commands are being called from the internal shell.",
+                DefaultValueFactory = p => false,
+                Hidden = true
+            };
+
             Option<int> idOption = new("--id")
             {
                 Description = "Specify id for new cardinal characteristic.",
@@ -82,10 +89,10 @@ namespace CCView
                 DefaultValueFactory = p => false
             };
 
-            Option<char> typeOption = new("--type")
+            Option<string> typeOption = new("--type")
             {
                 Description = "Type of relation.",
-                DefaultValueFactory = p => '>'
+                DefaultValueFactory = p => ">"
             };
 
             Option<bool> pngOption = new("--toPng")
@@ -98,6 +105,12 @@ namespace CCView
             {
                 Description = "Save as a specified file.",
                 DefaultValueFactory = p => null! // Null-forgiving operator
+            };
+
+            Option<bool> densityOption = new("--btwn")
+            {
+                Description = "Compute the in-betweenness relation. (Slower initially, but makes constructing subsequent graphs faster).",
+                DefaultValueFactory = p => false
             };
 
             // Arguments //
@@ -123,6 +136,9 @@ namespace CCView
             };
 
             // Commands //
+
+            rootCommand.Options.Add(densityOption);
+            rootCommand.Options.Add(fromShellOption);
 
             // Add cardinal
             Command createCCCommand = new("create", "Create a new cardinal characteristic.")
@@ -166,13 +182,14 @@ namespace CCView
             relateCommand.SetAction(pR =>
             {
                 int[] ids = pR.GetValue(idsArgument)!; // ! here is the null-forgiving operator, which is okay because we know that it is never null
-                char type = pR.GetValue(typeOption);
+                string typeString = pR.GetValue(typeOption) ?? "X";
+                char type = typeString[0];
                 env.RelateCardinals(ids[0], ids[1], type);
                 if (Program._loadLog)
                 {
                     var c1 = env.Relations.GetCardinalById(ids[0]);
                     var c2 = env.Relations.GetCardinalById(ids[1]);
-                    Console.WriteLine($"Cardinals {c1} and {c2} related with type '>' relation.");
+                    Console.WriteLine($"Cardinals {c1} and {c2} related with type '{type}' relation.");
                 }
             });
 
@@ -189,14 +206,12 @@ namespace CCView
             relateSymbolCommand.SetAction(pR =>
             {
                 string[] symbols = pR.GetValue(symbolsArgument)!;
-                char type = pR.GetValue(typeOption);
+                string typeString = pR.GetValue(typeOption) ?? "X";
+                char type = typeString[0];
                 CC Item1 = env.Relations.GetCardinalBySymbol(symbols[0]);
                 CC Item2 = env.Relations.GetCardinalBySymbol(symbols[1]);
                 env.RelateCardinals(Item1.Id, Item2.Id, type);
-                if (Program._loadLog)
-                {
-                    Console.WriteLine($"Cardinals {Item1} and {Item2} related with type '>' relation.");
-                }
+                Program.LoadLog($"Cardinals {Item1} and {Item2} related with type '{type}' relation.");
             });
 
             // Compute transitive closure
@@ -205,7 +220,7 @@ namespace CCView
 
             transCommand.SetAction(pR =>
             {
-                env.Relations.TransClose();
+                env.TransClose();
             });
 
             // Save
@@ -251,28 +266,30 @@ namespace CCView
                 }
             });
 
-            // Commands to add:
-            // Load cardinals and relations
-            // Compute closure
-            // Note that outside of the command line environment you'll want to specify which files you're loading and unloading each time...
+            Command listRelsCommand = new("relations", "List of relations between cardinal characteristics.");
+            listCommand.Subcommands.Add(listRelsCommand);
+
+            listRelsCommand.SetAction(pR =>
+            {
+                foreach (Relation r in env.Relations.Relations)
+                {
+                    Console.WriteLine(r);
+                }
+            });
 
             // root command puts us into a command line shell
             rootCommand.SetAction(pR =>
             {
-                if (Program._loadLog)
+                if (!pR.GetValue(fromShellOption))
                 {
-                    Console.WriteLine("Creating Interactive Shell.");
+                    Program.LoadLog("Creating Interactive Shell.");
+                    var shell = new InteractiveShell(env, rootCommand);
+                    Program.LoadLog("Interactive Shell created.");
+                    if (pR.GetValue(densityOption)) env.PopulateDensity();
+                    Program.LoadLog("Loading complete.");
+                    shell.Run();
                 }
-                var shell = new InteractiveShell(env, rootCommand);
-                if (Program._loadLog)
-                {
-                    Console.WriteLine("Interactive Shell created.");
-                }
-                if (Program._loadLog)
-                {
-                    Console.WriteLine("Loading complete.");
-                }
-                shell.Run();
+                else if (pR.GetValue(densityOption)) env.PopulateDensity();
             });
 
             return rootCommand.Parse(args).Invoke();
@@ -286,7 +303,11 @@ namespace CCView
         }
 
         public static string GetOutputPath() => GetOutputPath("");
-
+        public static string LoadLog(string message)
+        {
+            if (_loadLog) Console.WriteLine(message);
+            return _loadLog ? message : "";
+        }
     }
 
     public class RelationEnvironment
@@ -312,10 +333,7 @@ namespace CCView
 
         public RelationEnvironment(string ccFile, string relsFile, string dotFile, string graphFile)
         {
-            if (Program._loadLog)
-            {
-                Console.WriteLine("Loading Relation Environment.");
-            }
+            Program.LoadLog("Loading Relation Environment.");
             BaseDirectory = AppContext.BaseDirectory;
             LoadDirectory = Path.GetFullPath(Path.Combine(BaseDirectory, @"../../../assets/"));
             OutDirectory = Path.GetFullPath(Path.Combine(BaseDirectory, @"../../../output/"));
@@ -331,25 +349,13 @@ namespace CCView
             GraphPath = Path.Combine(OutDirectory, GraphFile);
 
             //LoadedCardinals = JsonInterface.LoadCardinals(CCPath);
-            if (Program._loadLog)
-            {
-                Console.WriteLine("Loading cardinals.");
-            }
+            Program.LoadLog("Loading cardinals.");
             LoadedCardinals = JsonFileHandler.Load<CC>(CCPath);
-            if (Program._loadLog)
-            {
-                Console.WriteLine("Loading relations.");
-            }
+            Program.LoadLog("Loading relations.");
             LoadedRelations = JsonFileHandler.LoadRelations(RelsPath, LoadedCardinals).ToHashSet();
-            if (Program._loadLog)
-            {
-                Console.WriteLine("Creating Relation Database environment.");
-            }
+            Program.LoadLog("Creating Relation Database environment.");
             Relations = new RelationDatabase(LoadedCardinals, LoadedRelations);
-            if (Program._loadLog)
-            {
-                Console.WriteLine("Relation Environment complete.");
-            }
+            Program.LoadLog("Relation Environment complete.");
         }
 
         public RelationEnvironment() : this("cardinal_characteristics", "relations", "relations", "graph")
@@ -382,15 +388,9 @@ namespace CCView
         {
             Unsaved = false;
             JsonFileHandler.Save<CC>(CCPath, Cardinals);
-            if (Program._loadLog)
-            {
-                Console.WriteLine($"Cardinals saved to {CCPath}.");
-            }
+            Program.LoadLog($"Cardinals saved to {CCPath}.");
             JsonFileHandler.Save<Relation>(RelsPath, Relations.Relations.ToList());
-            if (Program._loadLog)
-            {
-                Console.WriteLine($"Relations saved to {RelsPath}.");
-            }
+            Program.LoadLog($"Relations saved to {RelsPath}.");
         }
 
         public void AddCardinal(string? name, string? symbol, int id)
@@ -408,11 +408,16 @@ namespace CCView
             Relations.AddRelationByIds(idOne, idTwo, type);
             Unsaved = true;
         }
+        public void TransClose()
+        {
+            int numNewRels = Relations.TransClose();
+            if (numNewRels > 0) Unsaved = true;
+        }
 
         public string PlotGraphDot(int[] ids, string fileName)
         {
             List<CC> cardinals = ids.Select(id => Relations.GetCardinalByIdOrThrow(id)).ToList();
-            var dot = GraphLogic.Vis.GraphDrawer.GenerateGraph(Relations.GetMinimalRelations(cardinals), cardinals);
+            var dot = GraphLogic.Vis.GraphDrawer.GenerateGraph(cardinals, Relations.GetMinimalRelations(cardinals));
             GraphLogic.Vis.GraphDrawer.WriteDotFile(dot, Path.Combine(OutDirectory, fileName));
             return dot;
         }
@@ -432,6 +437,10 @@ namespace CCView
         public void PlotGraphPng(string dot)
         {
             PlotGraphPng(DotFile, GraphFile);
+        }
+        public void PopulateDensity()
+        {
+            if (Relations.PopulateDensity()) Unsaved = true;
         }
     }
     public class InteractiveShell
@@ -477,6 +486,7 @@ namespace CCView
                 if (string.IsNullOrWhiteSpace(input)) continue;
 
                 string[] args = input.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                args = [.. args.Prepend("--fromShell")];
                 rootCommand.Parse(args).Invoke();
             }
         }
