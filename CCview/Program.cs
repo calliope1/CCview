@@ -25,6 +25,9 @@ namespace CCView
         public static bool ShouldExit { get; private set; } = false;
         static int Main(string[] args)
         {
+            //Console.WriteLine("Hi Callie! This is your reminder that we want to implement 'atomic' versus 'non-atomic' relations now. So make sure they can save/load properly and that the derivations work as intended. Throw in some checks to make sure that a derivation doesn't contain multiple of the same atomic relation, since that would allow infinite descending derivations of known theorems. Maybe also implement a GetAge() function.");
+            //Console.WriteLine("Also get rid of ArtId in Relation.");
+
             // For now we assume that we are only ever working with one set of files: cardinal_characteristics.json and relations.json
             var Env = new RelationEnvironment();
             return Run(Env, args);

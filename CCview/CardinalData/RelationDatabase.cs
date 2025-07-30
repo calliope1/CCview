@@ -52,14 +52,13 @@ namespace CCView.CardinalData
         }
     }
 
-    public class Article : JsonHandler.JsonCRTP<Article>
+    public class Article : JsonCRTP<Article>
     {
         public int Id { get; private set; } = -1;
         public int Year { get; private set; } = int.MaxValue;
         public string Name { get; private set; } = "Article name required!";
         public string Citation { get; private set; } = "Citation required!";
         protected override List<string> FieldsToSave => ["Id", "Year", "Name", "Citation"];
-        //[JsonSaveableConstructor]
         public Article(JArray args)
         {
             Id = args[0].Value<int>();
@@ -104,7 +103,7 @@ namespace CCView.CardinalData
     // // // This saves repeatedly asking about adjacency and possibly even saves memory.
     // // // We should also store the dictionaries I suppose. Should we give Relations ids?
 
-    public class Relation : JsonHandler.JsonCRTP<Relation>
+    public class Relation : JsonCRTP<Relation>
     {
         public CC Item1 { get; set; }
         public int Item1Id { get; set; } = -1;
@@ -112,6 +111,8 @@ namespace CCView.CardinalData
         public int Item2Id { get; set; } = -1;
         public Char Type { get; set; }
         public int TypeId { get; set; } = -1;
+        public List<AtomicRelation> Derivation { get; set; } = [];
+        // TO DO: GET RID OF ArticleId
         public int ArticleId { get; set; } = -1; // -1 is 'no evidence'
         public int Year { get; set; } = int.MaxValue; // Should just point to the article's year tbh, lets set up an indexing list for that
         // Max value to be as 'young' as possible, so that relations without evidence are generally discarded in favour of those that have evidence where applicable
@@ -182,7 +183,24 @@ namespace CCView.CardinalData
                 : $"Relation type {Type} between {Item1} and {Item2}";
         }
     }
-    public class Model : JsonCRTP<Model>
+    // "Atomic" relation that is proved directly by a single model or theorem
+    // AtomicRelations (and Relations) then derive further Relations that have a witnessing signature of atomic relations
+    public class AtomicRelation
+    {
+        public CC Item1 { get; set; } = new();
+        public CC Item2 { get; set; } = new();
+        public Char Type { get; set; } = 'X';
+        public Theorem Witness { get; set; } = new();
+    }
+    // "Atomic" unit of proof, one theorem or model that implies one or more relations directly
+    public class Theorem : JsonCRTP<Theorem>
+    {
+        public Article Article { get; set; } = null!;
+        public HashSet<AtomicRelation> Results { get; set; } = [];
+        protected override List<string> FieldsToSave => [];
+        public override void InstantiateFromJArray(JArray jsonData) { }
+    }
+    public class Model : Theorem
     {
         public int Id { get; private set; } = -1;
         public int ArticleId { get; set; } = -1;
@@ -205,6 +223,24 @@ namespace CCView.CardinalData
         public override string ToString()
         {
             return $"Model ID {Id} from Article ID {ArticleId}";
+        }
+        public HashSet<Relation> GenerateRelations(IEnumerable<CC> cardinals)
+        {
+            HashSet<Relation> newRels = [];
+            for (int i = 0; i < CardinalValues.Count; i++)
+            {
+                for (int j = i + 1; j < CardinalValues.Count; j++)
+                {
+                    foreach (CC smaller in CardinalValues[i])
+                    {
+                        foreach (CC larger in CardinalValues[j])
+                        {
+                            newRels.Add(new(larger, smaller, 'C', ArticleId, Id));
+                        }
+                    }
+                }
+            }
+            return newRels;
         }
     }
 }
