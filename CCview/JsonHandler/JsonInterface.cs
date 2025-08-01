@@ -2,8 +2,10 @@ using CCView.CardinalData;
 using CCView.CardinalData.Compute;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System;
 using System.Reflection;
 using CC = CCView.CardinalData.CardinalCharacteristic;
+using System.Collections;
 //using Microsoft.Extensions.ObjectPool;
 
 namespace CCView.JsonHandler
@@ -66,6 +68,23 @@ namespace CCView.JsonHandler
     {
         protected abstract List<string> FieldsToSave { get; }
         public abstract void InstantiateFromJArray(JArray jsonData);
+        private static JArray IteratedTurnToToken(IEnumerable enumerable)
+        {
+            JArray newArray = [];
+            foreach (object item in enumerable)
+            {
+                if (item is IEnumerable subenumerable && item is not string)
+                {
+                    JArray subArray = IteratedTurnToToken(subenumerable);
+                    newArray.Add(subArray);
+                }
+                else
+                {
+                    newArray.Add(JToken.FromObject(item));
+                }
+            }
+            return newArray;
+        }
         public virtual JArray TurnToJson()
         {
             JArray jsonArray = [];
@@ -91,17 +110,19 @@ namespace CCView.JsonHandler
                     }
                     currentType = currentObject.GetType();
                 }
-                if (currentObject == null)
-                {
-                    continue;
-                }
+                if (currentObject == null) continue;
                 PropertyInfo finalProp = currentType.GetProperty(finalPropName)!;
-                if (finalProp == null)
-                {
-                    continue;
-                }
+                if (finalProp == null) continue;
                 object value = finalProp.GetValue(currentObject)!;
-                jsonArray.Add(JToken.FromObject(value));
+                if (value is IEnumerable enumerable && value is not string)
+                {
+                    JArray subArray = IteratedTurnToToken(enumerable);
+                    jsonArray.Add(subArray);
+                }
+                else
+                {
+                    jsonArray.Add(JToken.FromObject(value));
+                }
             }
             return jsonArray;
         }

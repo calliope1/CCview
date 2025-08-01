@@ -4,6 +4,7 @@ using CC = CCView.CardinalData.CardinalCharacteristic;
 using QuikGraph;
 using Newtonsoft.Json.Linq;
 using CCView.JsonHandler;
+using System.Linq;
 
 namespace CCView.CardinalData
 {
@@ -55,30 +56,26 @@ namespace CCView.CardinalData
     public class Article : JsonCRTP<Article>
     {
         public int Id { get; private set; } = -1;
-        public int Year { get; private set; } = int.MaxValue;
+        // Generally represented as YYYYMMDD, with XX = 99 if not found. MaxValue for 'no year' for simplicity
+        public int Date { get; private set; } = int.MaxValue;
         public string Name { get; private set; } = "Article name required!";
         public string Citation { get; private set; } = "Citation required!";
-        protected override List<string> FieldsToSave => ["Id", "Year", "Name", "Citation"];
-        public Article(JArray args)
+        private HashSet<Theorem> Results { get; set; } = []; // Lets keep this private until we know if we need it
+        // We're not going to save the subordinate Theorems, since these can be reconstructed at runtime
+        protected override List<string> FieldsToSave => ["Id", "Date", "Name", "Citation"];
+        public Article(int id, int date, string name, string citation)
         {
-            Id = args[0].Value<int>();
-            Year = args[1].Value<int>();
-            Name = args[2].Value<string>() ?? "Article name required!";
-            Citation = args[3].Value<string>() ?? "Citation required!";
+            Id = id;
+            Date = date;
+            Name = name;
+            Citation = citation;
         }
         public override void InstantiateFromJArray(JArray args)
         {
             Id = args[0].Value<int>();
-            Year = args[1].Value<int>();
+            Date = args[1].Value<int>();
             Name = args[2].Value<string>() ?? "Article name required!";
             Citation = args[3].Value<string>() ?? "Citation required!";
-        }
-        public Article(int id, int year, string name, string citation)
-        {
-            Id = id;
-            Year = year;
-            Name = name;
-            Citation = citation;
         }
         public override bool Equals(object? obj)
         {
@@ -171,7 +168,6 @@ namespace CCView.CardinalData
                    ArticleId.Equals(other.ArticleId) &&
                    Type == other.Type;
         }
-
         public override int GetHashCode()
         {
             return HashCode.Combine(Item1, Item2, ArticleId, Type);
@@ -181,6 +177,11 @@ namespace CCView.CardinalData
             return ArticleId != -1
                 ? $"Relation type {Type} between {Item1} and {Item2} from article id {ArticleId}"
                 : $"Relation type {Type} between {Item1} and {Item2}";
+        }
+        // TypeIds *could* be shorts because Char and short are both 16 bit, but this is excessive
+        public static int TypeIdFromChar(Char type)
+        {
+            return TypeIndices.First(x => x == type);
         }
     }
     // "Atomic" relation that is proved directly by a single model or theorem
@@ -195,26 +196,26 @@ namespace CCView.CardinalData
     // "Atomic" unit of proof, one theorem or model that implies one or more relations directly
     public class Theorem : JsonCRTP<Theorem>
     {
+        public int Id { get; set; } = -1;
+        public int ArtId { get; set; } = -1;
         public Article Article { get; set; } = null!;
-        public HashSet<AtomicRelation> Results { get; set; } = [];
-        protected override List<string> FieldsToSave => [];
-        public override void InstantiateFromJArray(JArray jsonData) { }
-    }
-    public class Model : Theorem
-    {
-        public int Id { get; private set; } = -1;
-        public int ArticleId { get; set; } = -1;
-        public List<HashSet<CC>> CardinalValues { get; set; } = [];
-        // The idea with CardinalValues is that each set in the list is an equivalence class by equipotence
-        // Then if one set comes before another, the cardinals in the first set are less than those in the second
-        protected override List<string> FieldsToSave => ["Id", "ArticleId"];
-        public override void InstantiateFromJArray(JArray jsonData)
+        // Results is directly proved relations between cardinals in the description
+        // If there is a model that implicitly proves certain relations, use the Model subclass
+        public HashSet<(CC, CC, Char)> Results { get; set; } = [];
+        // A ResId is a (CC.Id, CC.Id, TypeId)
+        public HashSet<int[]> ResIds { get; set; } = [];
+        public string Description { get; set; } = "No description provided.";
+        protected override List<string> FieldsToSave => ["Id", "ArtId", "ResIds", "Description"];
+        public override void InstantiateFromJArray(JArray args)
         {
-            throw new NotImplementedException();
+            Id = args[0].Value<int>();
+            ArtId = args[1].Value<int>();
+            ResIds = args[2].Value<HashSet<int[]>>() ?? [];
+            Description = args[3].Value<string>() ?? "No description provided.";
         }
         public override bool Equals(object? obj)
         {
-            return obj is Model other && other.Id == Id;
+            return obj is Theorem other && Id.Equals(other.Id);
         }
         public override int GetHashCode()
         {
@@ -222,20 +223,67 @@ namespace CCView.CardinalData
         }
         public override string ToString()
         {
-            return $"Model ID {Id} from Article ID {ArticleId}";
+            return $"Theorem ID:{Id} '{Description}' of {Article}";
         }
-        public HashSet<Relation> GenerateRelations(IEnumerable<CC> cardinals)
+        public Theorem(int id, Article article, HashSet<(CC, CC, char)> results, string description)
         {
-            HashSet<Relation> newRels = [];
-            for (int i = 0; i < CardinalValues.Count; i++)
+            Id = id;
+            Article = article;
+            Results = results;
+            Description = description;
+            ArtId = Article.Id;
+            ResIds = Results.Select<(CC, CC, char), int[]>(r => [r.Item1.Id, r.Item2.Id, Relation.TypeIdFromChar(r.Item3)]).ToHashSet();
+        }
+        public Theorem() { }
+    }
+    public class Model : Theorem
+    {
+        // The idea with CardinalValues is that each set in the list is an equivalence class by equipotence
+        // Then if one set comes before another, the cardinals in the first set are less than those in the second
+        public List<HashSet<CC>> Values { get; set; } = [];
+        public List<HashSet<int>> ValIds { get; set; } = [];
+        protected override List<string> FieldsToSave => ["Id", "Article.Id", "ResIds", "Description", "ValIds"];
+        public Model(int id, Article article, HashSet<(CC, CC, char)> results, string description, List<HashSet<CC>> values)
+            : base(id, article, results, description)
+        {
+            Values = values;
+            ArtId = article.Id;
+            ResIds = Results.Select<(CC, CC, char), int[]>(r => [r.Item1.Id, r.Item2.Id, Relation.TypeIdFromChar(r.Item3)]).ToHashSet();
+            ValIds = Values.Select(v => v.Select(w => w.Id).ToHashSet()).ToList();
+        }
+        public override void InstantiateFromJArray(JArray args)
+        {
+            Id = args[0].Value<int>();
+            ArtId = args[1].Value<int>();
+            ResIds = args[2].Value<HashSet<int[]>>() ?? [];
+            Description = args[3].Value<string>() ?? "No description provided!";
+            ValIds = args[4].Value<List<HashSet<int>>>() ?? [];
+        }
+        public override bool Equals(object? obj)
+        {
+            return obj is Model other && Id.Equals(other.Id);
+        }
+        public override int GetHashCode()
+        {
+            return Id.GetHashCode();
+        }
+        public override string ToString()
+        {
+            return $"Model ID:{Id} '{Description}' from {Article}";
+        }
+        public HashSet<AtomicRelation> GenerateAtoms(IEnumerable<CC> cardinals)
+        {
+            HashSet<AtomicRelation> newRels = [];
+            for (int i = 0; i < Values.Count; i++)
             {
-                for (int j = i + 1; j < CardinalValues.Count; j++)
+                for (int j = i + 1; j < Values.Count; j++)
                 {
-                    foreach (CC smaller in CardinalValues[i])
+                    foreach (CC smaller in Values[i])
                     {
-                        foreach (CC larger in CardinalValues[j])
+                        foreach (CC larger in Values[j])
                         {
-                            newRels.Add(new(larger, smaller, 'C', ArticleId, Id));
+                            //newRels.Add(new(larger, smaller, 'C', ArticleId, Id));
+                            throw new NotImplementedException();
                         }
                     }
                 }
@@ -251,7 +299,7 @@ namespace CCView.CardinalData.Compute
     {
         public List<CC> Cardinals { get; private set; } = [];
         public HashSet<Relation> Relations { get; private set; } = [];
-        private List<Article> Articles { get; set; } = [];
+        public List<Article> Articles { get; private set; } = [];
         private List<Model> Models { get; set; } = [];
         private List<int> CCI { get; set; } = [];
         private List<int> ArtInds { get; set; } = [];
@@ -282,7 +330,7 @@ namespace CCView.CardinalData.Compute
             {
                 if (r.ArticleId != -1)
                 {
-                    r.Year = Articles[ArtInds[r.ArticleId]].Year;
+                    r.Year = Articles[ArtInds[r.ArticleId]].Date;
                 }
             }
 
@@ -562,7 +610,7 @@ namespace CCView.CardinalData.Compute
         }
         private int RelAge(Relation relation)
         {
-            return Articles[ArtInds[relation.ArticleId]].Year;
+            return Articles[ArtInds[relation.ArticleId]].Date;
         }
     }
 }

@@ -16,6 +16,7 @@ using CCView.CardinalData;
 using CCView.CardinalData.Compute;
 using CC = CCView.CardinalData.CardinalCharacteristic;
 using CCView.JsonHandler;
+using System.Collections;
 
 namespace CCView
 {
@@ -174,6 +175,24 @@ namespace CCView
                 }
             });
 
+            // Add article
+            Command createArticle = new("article", "Create an article.")
+            {
+                idOption,
+                //dateOption,
+                //citationOption,
+                nameArgument
+            };
+            createCCCommand.Subcommands.Add(createArticle);
+            createArticle.SetAction(pR =>
+            {
+                int id = pR.GetValue(idOption);
+                string name = pR.GetValue(nameArgument) ?? "No name provided!";
+                Article newArt = new(id, int.MaxValue, name, "Citations not yet implemented!");
+                // This is NOT how we should be doing it! But I need to do some work and this is just to test the saving features
+                env.Relations.Articles.Add(newArt);
+            });
+
             // Add relation
             Command relateCommand = new("relate", "Add a relation between two cardinals.")
             {
@@ -319,8 +338,10 @@ namespace CCView
         public String LoadDirectory { get; set; }
         public String CCFile { get; set; } = "cardinal_characteristics";
         public String RelsFile { get; set; } = "relations";
+        public string ArtsFile { get; set; } = "articles";
         public String CCPath { get; set; }
         public String RelsPath { get; set; }
+        public string ArtsPath { get; set; }
         public String OutDirectory { get; set; }
         public String DotFile { get; set; } = "relations";
         public String GraphFile { get; set; } = "graph";
@@ -329,12 +350,14 @@ namespace CCView
 
         private List<CC> LoadedCardinals;
         private HashSet<Relation> LoadedRelations;
+        private List<Article> LoadedArticles;
         public RelationDatabase Relations = new RelationDatabase();
         public bool Unsaved { get; private set; } = false;
         public List<CC> Cardinals => Relations.Cardinals;
+        public List<Article> Articles => Relations.Articles;
 
 
-        public RelationEnvironment(string ccFile, string relsFile, string dotFile, string graphFile)
+        public RelationEnvironment(string ccFile, string relsFile, string dotFile, string graphFile, string artsFile)
         {
             Program.LoadLog("Loading Relation Environment.");
             BaseDirectory = AppContext.BaseDirectory;
@@ -345,23 +368,27 @@ namespace CCView
             RelsFile = AddExtension(relsFile, ".json", "Relations file");
             DotFile = AddExtension(dotFile, ".dot", "Dot file");
             GraphFile = AddExtension(graphFile, ".png", "Graph file");
+            ArtsFile = AddExtension(artsFile, ".json", "Articles file");
 
             CCPath = Path.Combine(LoadDirectory, CCFile);
             RelsPath = Path.Combine(LoadDirectory, RelsFile);
             DotPath = Path.Combine(OutDirectory, DotFile);
             GraphPath = Path.Combine(OutDirectory, GraphFile);
+            ArtsPath = Path.Combine(LoadDirectory, ArtsFile);
 
             //LoadedCardinals = JsonInterface.LoadCardinals(CCPath);
             Program.LoadLog("Loading cardinals.");
             LoadedCardinals = JsonFileHandler.Load<CC>(CCPath);
             Program.LoadLog("Loading relations.");
             LoadedRelations = JsonFileHandler.LoadRelations(RelsPath, LoadedCardinals).ToHashSet();
+            Program.LoadLog("Not loading articles because article loading is un-implemented.");
+            LoadedArticles = [];
             Program.LoadLog("Creating Relation Database environment.");
             Relations = new RelationDatabase(LoadedCardinals, LoadedRelations);
             Program.LoadLog("Relation Environment complete.");
         }
 
-        public RelationEnvironment() : this("cardinal_characteristics", "relations", "relations", "graph")
+        public RelationEnvironment() : this("cardinal_characteristics", "relations", "relations", "graph", "articles")
         {
         }
 
@@ -390,10 +417,12 @@ namespace CCView
         public void Save()
         {
             Unsaved = false;
-            JsonFileHandler.Save<CC>(CCPath, Cardinals);
+            JsonFileHandler.Save(CCPath, Cardinals);
             Program.LoadLog($"Cardinals saved to {CCPath}.");
-            JsonFileHandler.Save<Relation>(RelsPath, Relations.Relations.ToList());
+            JsonFileHandler.Save(RelsPath, Relations.Relations.ToList());
             Program.LoadLog($"Relations saved to {RelsPath}.");
+            JsonFileHandler.Save(ArtsPath, Articles);
+            Program.LoadLog($"Articles saved to {ArtsPath}.");
         }
 
         public void AddCardinal(string? name, string? symbol, int id)
