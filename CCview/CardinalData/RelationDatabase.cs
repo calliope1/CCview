@@ -5,6 +5,7 @@ using QuikGraph;
 using Newtonsoft.Json.Linq;
 using CCView.JsonHandler;
 using System.Linq;
+using CCView.CardinalData.Compute;
 
 namespace CCView.CardinalData
 {
@@ -52,7 +53,6 @@ namespace CCView.CardinalData
             return $"{Name} (ID: {Id})";
         }
     }
-
     public class Article : JsonCRTP<Article>
     {
         public int Id { get; private set; } = -1;
@@ -87,7 +87,11 @@ namespace CCView.CardinalData
         }
         public override string ToString()
         {
-            return $"Article {Name} (ID: {Id}).";
+            return $"Article {Name} (ID: {Id}) from {Date}";
+        }
+        public void GetNewId(RelationDatabase rD, bool fast = false)
+        {
+            this.Id = rD.NewArtId(fast);
         }
     }
 
@@ -513,7 +517,7 @@ namespace CCView.CardinalData.Compute
                 }
             }
         }
-        public int NewId(bool fast = false)
+        public int NewCCId(bool fast = false)
         {
             if (fast)
             {
@@ -529,6 +533,45 @@ namespace CCView.CardinalData.Compute
                 }
                 return newId;
             }
+        }
+        public int NewArtId(bool fast = false)
+        {
+            if (fast)
+            {
+                return Articles.Count;
+            }
+            else
+            {
+                var newId = 0;
+                var usedIds = new HashSet<int>(Articles.Select(a => a.Id));
+                while (usedIds.Contains(newId))
+                {
+                    newId++;
+                }
+                return newId;
+            }
+        }
+        public Article AddArticleIdSafe(Article article)
+        {
+            int id = article.Id;
+            if (id == -1 || Articles.Select(a => a.Id).Contains(id))
+            {
+                article.GetNewId(this);
+            }
+            Articles.Add(article);
+            return article;
+        }
+        public Article AddArticle(string? name, int date, string? citation, int id)
+        {
+            Article art = new(id, date, name ?? "No title provided", citation ?? "No citation provided");
+            Articles.Add(art);
+            return art;
+        }
+        public Article AddArticle(string? name, int date, string? citation)
+        {
+            Article art = new(NewArtId(), date, name ?? "No title provided", citation ?? "No citation provided");
+            Articles.Add(art);
+            return art;
         }
         public void AddCardinal(string? name, string? symbol, int id)
         {
@@ -547,7 +590,7 @@ namespace CCView.CardinalData.Compute
         }
         public void AddCardinal(string? name, string? symbol, bool fast = false)
         {
-            AddCardinal(name, symbol, NewId(fast));
+            AddCardinal(name, symbol, NewCCId(fast));
         }
         public bool IsRelated(CC a, CC b, char type)
         {

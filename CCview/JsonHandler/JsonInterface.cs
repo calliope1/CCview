@@ -3,9 +3,11 @@ using CCView.CardinalData.Compute;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
-using System.Reflection;
-using CC = CCView.CardinalData.CardinalCharacteristic;
 using System.Collections;
+using System.CommandLine;
+using System.Reflection;
+using System.Text;
+using CC = CCView.CardinalData.CardinalCharacteristic;
 //using Microsoft.Extensions.ObjectPool;
 
 namespace CCView.JsonHandler
@@ -59,6 +61,67 @@ namespace CCView.JsonHandler
                 r.Item2 = cardinals[idIndList[r.Item2Id]];
             }
             return relations;
+        }
+        public static Article DeserializeArticle(string json)
+        {
+            JObject jObj = JObject.Parse(json);
+            string dateStamp = (string?)jObj["result"]?["datestamp"] ?? "99999999";
+            string title = (string?)jObj["result"]?["title"]?["title"] ?? "No title found";
+            int dateCombined = 0;
+            if (DateTime.TryParse(dateStamp, out DateTime date))
+            {
+                dateCombined = date.Year * 10000 + date.Month * 100 + date.Day;
+
+            }
+            else
+            {
+                Program.LoadLog("Datetime stamp of this json is malformed.");
+                dateCombined = 99999999;
+            }
+            string citation = ToBibTeX(jObj);
+            return new(-1, dateCombined, title, citation);
+        }
+        public static string ToBibTeX(JObject json)
+        {
+            if (json["result"] is not JObject result)
+                return "// Invalid JSON: 'result' field missing";
+
+            string id = result["id"]?.ToString()!;
+            string title = result["title"]?["title"]?.ToString()!;
+            string year = result["year"]?.ToString()!;
+
+            var authors = result["contributors"]?["authors"] as JArray;
+            string authorField = authors != null
+                ? string.Join(" and ", authors.Select(a => a["name"]?.ToString()).Where(n => !string.IsNullOrWhiteSpace(n)))
+                : null!;
+
+            var series = result["source"]?["series"]?.FirstOrDefault();
+            string journal = series?["short_title"]?.ToString()!;
+            string volume = series?["volume"]?.ToString()!;
+            string pages = series?["pages"]?.ToString()!;
+
+            string citationKey = $"Zbl{id}";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"@article{{{citationKey},");
+
+            void AddField(string name, string? value)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                    sb.AppendLine($"  {name,-9}= \"{value}\",");
+            }
+
+            AddField("author", authorField);
+            AddField("title", title);
+            AddField("journal", journal);
+            AddField("volume", volume);
+            AddField("pages", pages);
+            AddField("year", year);
+            AddField("note", $"Zbl {id}");
+
+            // Remove trailing comma from last field
+            var bibtex = sb.ToString().TrimEnd(',', '\r', '\n') + "\n}";
+            return bibtex;
         }
     }
 

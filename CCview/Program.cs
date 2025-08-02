@@ -17,6 +17,11 @@ using CCView.CardinalData.Compute;
 using CC = CCView.CardinalData.CardinalCharacteristic;
 using CCView.JsonHandler;
 using System.Collections;
+using System;
+using System.Net.Http;
+using System.Threading.Tasks;
+using System.Text.Json;
+using System.Threading.Tasks;
 
 namespace CCView
 {
@@ -24,17 +29,17 @@ namespace CCView
     {
         private static readonly bool _loadLog = true;
         public static bool ShouldExit { get; private set; } = false;
-        static int Main(string[] args)
+        static async Task<int> Main(string[] args)
         {
             //Console.WriteLine("Hi Callie! This is your reminder that we want to implement 'atomic' versus 'non-atomic' relations now. So make sure they can save/load properly and that the derivations work as intended. Throw in some checks to make sure that a derivation doesn't contain multiple of the same atomic relation, since that would allow infinite descending derivations of known theorems. Maybe also implement a GetAge() function.");
             //Console.WriteLine("Also get rid of ArtId in Relation.");
 
             // For now we assume that we are only ever working with one set of files: cardinal_characteristics.json and relations.json
             var Env = new RelationEnvironment();
-            return Run(Env, args);
+            return await Run(Env, args);
         }
 
-        public static int Run(RelationEnvironment env, string[] args)
+        public static async Task<int> Run(RelationEnvironment env, string[] args)
         {
             RootCommand rootCommand = new("Cardinal characteristics visualiser!");
 
@@ -117,6 +122,18 @@ namespace CCView
                 DefaultValueFactory = p => false
             };
 
+            Option<string> citationOption = new("--cite")
+            {
+                Description = "The citation attached to a new article.",
+                DefaultValueFactory = p => "No citation!"
+            };
+
+            Option<int> dateOption = new("--date")
+            {
+                Description = "Date in YYYYMMDD format. Use 99 for unknown values.",
+                DefaultValueFactory = p => int.MaxValue
+            };
+
             // Arguments //
             Argument<string> nameArgument = new("name")
             {
@@ -137,6 +154,11 @@ namespace CCView
             Argument<string[]> symbolsArgument = new("symbols")
             {
                 Description = "Symbols of the cardinal characteristics."
+            };
+
+            Argument<int> zbArgument = new("ZBnumber")
+            {
+                Description = "Article number by the ZBMath organisational system (see zbmath.org). Do not include 'Zbl'."
             };
 
             // Commands //
@@ -178,19 +200,26 @@ namespace CCView
             // Add article
             Command createArticle = new("article", "Create an article.")
             {
+                nameArgument,
                 idOption,
-                //dateOption,
-                //citationOption,
-                nameArgument
+                dateOption,
+                citationOption
             };
             createCCCommand.Subcommands.Add(createArticle);
             createArticle.SetAction(pR =>
             {
-                int id = pR.GetValue(idOption);
                 string name = pR.GetValue(nameArgument) ?? "No name provided!";
-                Article newArt = new(id, int.MaxValue, name, "Citations not yet implemented!");
-                // This is NOT how we should be doing it! But I need to do some work and this is just to test the saving features
-                env.Relations.Articles.Add(newArt);
+                int id = pR.GetValue(idOption);
+                int date = pR.GetValue(dateOption);
+                string citation = pR.GetValue(citationOption) ?? "No citation provided!";
+                if (id == -1)
+                {
+                    env.AddArticle(name, date, citation);
+                }
+                else
+                {
+                    env.AddArticle(name, date, citation, id);
+                }
             });
 
             // Add relation
@@ -299,6 +328,39 @@ namespace CCView
                 }
             });
 
+            Command listArtsCommand = new("articles", "List of articles in the database.");
+            listCommand.Subcommands.Add(listArtsCommand);
+
+            listArtsCommand.SetAction(pR =>
+            {
+                foreach (Article a in env.Relations.Articles)
+                {
+                    Console.WriteLine(a);
+                }
+            });
+
+            // Import article from ZBMath
+            Command importArtCommand = new("import", "Import an article via a ZBMath number.")
+            {
+                zbArgument
+            };
+            rootCommand.Subcommands.Add(importArtCommand);
+
+            importArtCommand.SetAction(async pR =>
+            {
+                int zb = pR.GetValue(zbArgument);
+                await env.ImportArticle(zb);
+             });
+
+            Command importTestCommand = new("itest", "Test importing an article via a ZBMath number.");
+            rootCommand.Subcommands.Add(importTestCommand);
+
+            importTestCommand.SetAction(async pR =>
+            {
+                string zb = "7898322";
+                await rootCommand.Parse(["--fromShell", "import", zb]).InvokeAsync();
+            });
+
             // root command puts us into a command line shell
             rootCommand.SetAction(pR =>
             {
@@ -309,12 +371,12 @@ namespace CCView
                     Program.LoadLog("Interactive Shell created.");
                     if (pR.GetValue(densityOption)) env.PopulateDensity();
                     Program.LoadLog("Loading complete.");
-                    shell.Run();
+                    shell.Run().GetAwaiter().GetResult();
                 }
                 else if (pR.GetValue(densityOption)) env.PopulateDensity();
             });
 
-            return rootCommand.Parse(args).Invoke();
+            return await rootCommand.Parse(args).InvokeAsync();
         }
 
         public static string GetOutputPath(string filename)
@@ -440,6 +502,26 @@ namespace CCView
             Relations.AddRelationByIds(idOne, idTwo, type);
             Unsaved = true;
         }
+        public void AddArticle(string name, int date, string citation, int id)
+        {
+            Relations.AddArticle(name, date, citation, id);
+            Unsaved = true;
+        }
+        public void AddArticle(string name, int date, string citation)
+        {
+            Relations.AddArticle(name, date, citation);
+            Unsaved = true;
+        }
+        public async Task ImportArticle(int zb)
+        {
+            string url = $"https://api.zbmath.org/v1/document/{zb}";
+            Console.WriteLine($"Attempting to access {url}.");
+            string json = await InteractiveShell.GETString(url);
+            Article article = JsonFileHandler.DeserializeArticle(json);
+            Relations.AddArticleIdSafe(article);
+            Console.WriteLine($"New article {article} added.");
+            Unsaved = true;
+        }
         public void TransClose()
         {
             int numNewRels = Relations.TransClose();
@@ -460,7 +542,7 @@ namespace CCView
         }
         public int[] GetIdList()
         {
-            return Cardinals.Select(c => c.Id).ToArray();
+            return [.. Cardinals.Select(c => c.Id)];
         }
         public void PlotGraphPng(string dotFileName, string pngFileName)
         {
@@ -480,6 +562,8 @@ namespace CCView
         private bool ShouldExit = false;
         private readonly RelationEnvironment env;
         private readonly RootCommand rootCommand;
+        private static readonly HttpClient Client = new();
+        private static readonly JsonSerializerOptions Options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true }; 
         public InteractiveShell(RelationEnvironment env, RootCommand rootCommand)
         {
             this.env = env;
@@ -509,17 +593,27 @@ namespace CCView
 
             rootCommand.Subcommands.Add(exitCommand);
         }
-        public void Run()
+        public async Task Run()
         {
             while (!ShouldExit)
             {
                 Console.Write("> ");
                 string input = Console.ReadLine() ?? "";
                 if (string.IsNullOrWhiteSpace(input)) continue;
-
                 string[] args = input.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 args = [.. args.Prepend("--fromShell")];
-                rootCommand.Parse(args).Invoke();
+                await rootCommand.Parse(args).InvokeAsync();
+            }
+        }
+        public static async Task<string> GETString(string url)
+        {
+            try
+            {
+                return await Client.GetStringAsync(url);
+            }
+            catch (HttpRequestException e)
+            {
+                throw new ArgumentException($"Error fetching page: {e.Message}");
             }
         }
     }
