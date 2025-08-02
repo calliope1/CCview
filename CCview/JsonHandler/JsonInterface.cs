@@ -62,6 +62,46 @@ namespace CCView.JsonHandler
             }
             return relations;
         }
+        public static List<Model> LoadModels(string path, List<CC> cardinals, List<Article> articles)
+        {
+            List<JArray> data = LoadJsonData(path);
+            List<Model> models = [];
+            foreach (JArray item in data)
+            {
+                var instance = Activator.CreateInstance<Model>();
+                instance.InstantiateFromJArray(item);
+                foreach (var val in instance.ValIds)
+                {
+                    HashSet<CC> newValue = [];
+                    foreach (int id in val)
+                    {
+                        Console.WriteLine("We're not checking for ID indexing matching! Fix this!");
+                        newValue.Add(cardinals[id]);
+                    }
+                    instance.Values.Add(newValue);
+                }
+                Console.WriteLine("And again for article!");
+                instance.Article = articles[instance.ArtId];
+                instance.GenerateResults();
+                models.Add(instance);
+            }
+            return models;
+        }
+        public static List<Theorem> LoadTheorems(string path, List<CC> cardinals, List<Article> articles)
+        {
+            List<Theorem> theorems = Load<Theorem>(path);
+            foreach (Theorem thm in theorems)
+            {
+                Console.WriteLine("We're not checking for ID index matching on articles! Fix this!");
+                thm.Article = articles[thm.ArtId];
+                foreach (int[] res in thm.ResIds)
+                {
+                    Console.WriteLine("Check here that res has exactly three members.");
+                    thm.Results.Add((cardinals[res[0]], cardinals[res[1]], Relation.TypeIndices[res[2]]));
+                }
+            }
+            return theorems;
+        }
         public static Article DeserializeArticle(string json)
         {
             JObject jObj = JObject.Parse(json);

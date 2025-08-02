@@ -1,8 +1,8 @@
 [
   [
     0,
-    20150600,
-    "Small gaps between primes",
-    "Citation not yet implemented!"
+    20240819,
+    "The Hartogs-Lindenbaum spectrum of symmetric extensions",
+    "@article{Zbl7898322,\r\n  author   = \"Ryan-Smith, Calliope\",\r\n  title    = \"The Hartogs-Lindenbaum spectrum of symmetric extensions\",\r\n  journal  = \"Math. Log. Q.\",\r\n  volume   = \"70\",\r\n  year     = \"2024\",\r\n  note     = \"Zbl 7898322\"\n}"
   ]
 ]

@@ -146,6 +146,11 @@ namespace CCView
                 Description = "Ids of cardinal characteristics."
             };
 
+            Argument<int> idArgument = new("id")
+            {
+                Description = "Id of an object."
+            };
+
             Argument<string> symbolArgument = new("symbol")
             {
                 Description = "Symbol of the cardinal characteristic."
@@ -361,6 +366,27 @@ namespace CCView
                 await rootCommand.Parse(["--fromShell", "import", zb]).InvokeAsync();
             });
 
+            // Print a citation
+            Command citeCommand = new("cite", "Print an article citation")
+            {
+                idArgument
+            };
+            rootCommand.Subcommands.Add(citeCommand);
+
+            citeCommand.SetAction(pR =>
+            {
+                int id = pR.GetValue(idArgument);
+                Article? art = env.Relations.GetArticleById(id);
+                if (art == null)
+                {
+                    Console.WriteLine($"No article of ID {id} exists.");
+                }
+                else
+                {
+                    Console.WriteLine(art.Citation);
+                }
+            });
+
             // root command puts us into a command line shell
             rootCommand.SetAction(pR =>
             {
@@ -396,30 +422,40 @@ namespace CCView
 
     public class RelationEnvironment
     {
-        private String BaseDirectory { get; set; }
-        public String LoadDirectory { get; set; }
-        public String CCFile { get; set; } = "cardinal_characteristics";
-        public String RelsFile { get; set; } = "relations";
+        private string BaseDirectory { get; set; }
+        public string LoadDirectory { get; set; }
+        // We should change from having a different '<T>File' and '<T>Path' etc to a few dictionaries
+        //public Dictionary<string, string> LoadFiles { get; set; } = [];
+        public string CCFile { get; set; } = "cardinal_characteristics";
+        public string RelsFile { get; set; } = "relations";
         public string ArtsFile { get; set; } = "articles";
-        public String CCPath { get; set; }
-        public String RelsPath { get; set; }
+        public string ThmsFile { get; set; } = "theorems";
+        public string ModsFile { get; set; } = "models";
+        public string CCPath { get; set; }
+        public string RelsPath { get; set; }
         public string ArtsPath { get; set; }
-        public String OutDirectory { get; set; }
-        public String DotFile { get; set; } = "relations";
-        public String GraphFile { get; set; } = "graph";
-        public String DotPath { get; set; }
-        public String GraphPath { get; set; }
+        public string ThmsPath { get; set; }
+        public string ModsPath { get; set; }
+        public string OutDirectory { get; set; }
+        public string DotFile { get; set; } = "relations";
+        public string GraphFile { get; set; } = "graph";
+        public string DotPath { get; set; }
+        public string GraphPath { get; set; }
 
         private List<CC> LoadedCardinals;
         private HashSet<Relation> LoadedRelations;
         private List<Article> LoadedArticles;
+        private List<Theorem> LoadedTheorems;
+        private List<Model> LoadedModels;
         public RelationDatabase Relations = new RelationDatabase();
         public bool Unsaved { get; private set; } = false;
         public List<CC> Cardinals => Relations.Cardinals;
         public List<Article> Articles => Relations.Articles;
+        public List<Theorem> Theorems => Relations.Theorems;
+        public List<Model> Models => Relations.Models;
 
 
-        public RelationEnvironment(string ccFile, string relsFile, string dotFile, string graphFile, string artsFile)
+        public RelationEnvironment(string ccFile, string relsFile, string dotFile, string graphFile, string artsFile, string thmsFile, string modsFile)
         {
             Program.LoadLog("Loading Relation Environment.");
             BaseDirectory = AppContext.BaseDirectory;
@@ -431,26 +467,34 @@ namespace CCView
             DotFile = AddExtension(dotFile, ".dot", "Dot file");
             GraphFile = AddExtension(graphFile, ".png", "Graph file");
             ArtsFile = AddExtension(artsFile, ".json", "Articles file");
+            ThmsFile = AddExtension(thmsFile, ".json", "Theorems file");
+            ModsFile = AddExtension(modsFile, ".json", "Models file");
 
             CCPath = Path.Combine(LoadDirectory, CCFile);
             RelsPath = Path.Combine(LoadDirectory, RelsFile);
             DotPath = Path.Combine(OutDirectory, DotFile);
             GraphPath = Path.Combine(OutDirectory, GraphFile);
             ArtsPath = Path.Combine(LoadDirectory, ArtsFile);
+            ThmsPath = Path.Combine(LoadDirectory, ThmsFile);
+            ModsPath = Path.Combine(LoadDirectory, ModsFile);
 
             //LoadedCardinals = JsonInterface.LoadCardinals(CCPath);
             Program.LoadLog("Loading cardinals.");
             LoadedCardinals = JsonFileHandler.Load<CC>(CCPath);
             Program.LoadLog("Loading relations.");
             LoadedRelations = JsonFileHandler.LoadRelations(RelsPath, LoadedCardinals).ToHashSet();
-            Program.LoadLog("Not loading articles because article loading is un-implemented.");
-            LoadedArticles = [];
+            Program.LoadLog("Loading articles.");
+            LoadedArticles = JsonFileHandler.Load<Article>(ArtsPath);
+            Program.LoadLog("Loading theorems.");
+            LoadedTheorems = JsonFileHandler.LoadTheorems(ThmsPath, LoadedCardinals, LoadedArticles);
+            Program.LoadLog("Loading models.");
+            LoadedModels = JsonFileHandler.LoadModels(ModsPath, LoadedCardinals, LoadedArticles);
             Program.LoadLog("Creating Relation Database environment.");
-            Relations = new RelationDatabase(LoadedCardinals, LoadedRelations);
+            Relations = new RelationDatabase(LoadedCardinals, LoadedRelations, LoadedArticles, LoadedTheorems, LoadedModels);
             Program.LoadLog("Relation Environment complete.");
         }
 
-        public RelationEnvironment() : this("cardinal_characteristics", "relations", "relations", "graph", "articles")
+        public RelationEnvironment() : this("cardinal_characteristics", "relations", "relations", "graph", "articles", "theorems", "models")
         {
         }
 
@@ -485,6 +529,10 @@ namespace CCView
             Program.LoadLog($"Relations saved to {RelsPath}.");
             JsonFileHandler.Save(ArtsPath, Articles);
             Program.LoadLog($"Articles saved to {ArtsPath}.");
+            JsonFileHandler.Save(ThmsPath, Theorems);
+            Program.LoadLog($"Theorems saved to {ThmsPath}.");
+            JsonFileHandler.Save(ModsPath, Models);
+            Program.LoadLog($"Models saved to {ModsPath}.");
         }
 
         public void AddCardinal(string? name, string? symbol, int id)

@@ -70,6 +70,7 @@ namespace CCView.CardinalData
             Name = name;
             Citation = citation;
         }
+        public Article() { }
         public override void InstantiateFromJArray(JArray args)
         {
             Id = args[0].Value<int>();
@@ -113,14 +114,13 @@ namespace CCView.CardinalData
         public Char Type { get; set; }
         public int TypeId { get; set; } = -1;
         public List<AtomicRelation> Derivation { get; set; } = [];
-        // TO DO: GET RID OF ArticleId
-        public int ArticleId { get; set; } = -1; // -1 is 'no evidence'
+        public List<int[]> DerIds { get; set; } = [];
         public int Year { get; set; } = int.MaxValue; // Should just point to the article's year tbh, lets set up an indexing list for that
         // Max value to be as 'young' as possible, so that relations without evidence are generally discarded in favour of those that have evidence where applicable
         public static List<Char> TypeIndices { get; private set; } = ['>','C'];
         // '>' refers to ZFC \vdash Item1 \geq Item2
         // 'C' refers to Con(ZFC + Item1 > Item2). That is, Item2 \geq Item1 is unprovable
-        protected override List<string> FieldsToSave => ["Item1.Id", "Item2.Id", "TypeId", "ArticleId"];
+        protected override List<string> FieldsToSave => ["Item1.Id", "Item2.Id", "TypeId", "DerIds"];
         //[JsonSaveableConstructor]
         public Relation(JArray args, List<CC> cardinals)
         {
@@ -135,7 +135,7 @@ namespace CCView.CardinalData
             }
             TypeId = args[2].Value<int>();
             Type = Relation.TypeIndices[TypeId];
-            ArticleId = args[3].Value<int>();
+            DerIds = args[3].Value<List<int[]>>() ?? [];
         }
         public Relation() { Item1 = new(); Item2 = new(); }
         public override void InstantiateFromJArray(JArray args)
@@ -150,37 +150,29 @@ namespace CCView.CardinalData
             //}
             TypeId = args[2].Value<int>();
             Type = Relation.TypeIndices[TypeId];
-            ArticleId = args[3].Value<int>();
         }
-        public Relation(CC item1, CC item2, char type, int artId)
+        public Relation(CC item1, CC item2, char type)
         {
             Item1 = item1;
             Item2 = item2;
             Type = type;
-            ArticleId = artId;
             TypeId = TypeIndices.IndexOf(type);
         }
-        public Relation(CC item1, CC item2, char type) : this(item1, item2, type, -1)
-        {
-        }
 
-        public override bool Equals(object? obj)
+        public override bool Equals(object? obj) // This needs to be overhauled because of 'signature's.
         {
             return obj is Relation other &&
                    Item1.Equals(other.Item1) &&
                    Item2.Equals(other.Item2) &&
-                   ArticleId.Equals(other.ArticleId) &&
                    Type == other.Type;
         }
         public override int GetHashCode()
         {
-            return HashCode.Combine(Item1, Item2, ArticleId, Type);
+            return HashCode.Combine(Item1, Item2, Type); // Needs overhauling
         }
         public override string ToString()
         {
-            return ArticleId != -1
-                ? $"Relation type {Type} between {Item1} and {Item2} from article id {ArticleId}"
-                : $"Relation type {Type} between {Item1} and {Item2}";
+            return $"Relation type {Type} between {Item1} and {Item2}"; // Needs overhauling
         }
         // TypeIds *could* be shorts because Char and short are both 16 bit, but this is excessive
         public static int TypeIdFromChar(Char type)
@@ -196,6 +188,30 @@ namespace CCView.CardinalData
         public CC Item2 { get; set; } = new();
         public Char Type { get; set; } = 'X';
         public Theorem Witness { get; set; } = new();
+        public AtomicRelation(CC item1, CC item2, char type, Theorem witness)
+        {
+            Item1 = item1;
+            Item2 = item2;
+            Type = type;
+            Witness = witness;
+        }
+        public AtomicRelation() { }
+        public override bool Equals(object? obj)
+        {
+            return obj is AtomicRelation other
+                && other.Item1.Equals(Item1)
+                && other.Item2.Equals(Item2)
+                && other.Type.Equals(Type)
+                && other.Witness.Equals(Witness);
+        }
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(Item1, Item2, Type, Witness);
+        }
+        public override string ToString()
+        {
+            return $"Relation ID{Item1.Id} {Type} ID{Item2.Id} from ID{Witness.Id}";
+        }
     }
     // "Atomic" unit of proof, one theorem or model that implies one or more relations directly
     public class Theorem : JsonCRTP<Theorem>
@@ -247,6 +263,7 @@ namespace CCView.CardinalData
         public List<HashSet<CC>> Values { get; set; } = [];
         public List<HashSet<int>> ValIds { get; set; } = [];
         protected override List<string> FieldsToSave => ["Id", "Article.Id", "ResIds", "Description", "ValIds"];
+        private readonly int Cid = Relation.TypeIdFromChar('C');
         public Model(int id, Article article, HashSet<(CC, CC, char)> results, string description, List<HashSet<CC>> values)
             : base(id, article, results, description)
         {
@@ -275,9 +292,8 @@ namespace CCView.CardinalData
         {
             return $"Model ID:{Id} '{Description}' from {Article}";
         }
-        public HashSet<AtomicRelation> GenerateAtoms(IEnumerable<CC> cardinals)
+        public void GenerateResults()
         {
-            HashSet<AtomicRelation> newRels = [];
             for (int i = 0; i < Values.Count; i++)
             {
                 for (int j = i + 1; j < Values.Count; j++)
@@ -286,13 +302,12 @@ namespace CCView.CardinalData
                     {
                         foreach (CC larger in Values[j])
                         {
-                            //newRels.Add(new(larger, smaller, 'C', ArticleId, Id));
-                            throw new NotImplementedException();
+                            Results.Add(new(larger, smaller, 'C'));
+                            ResIds.Add([larger.Id, smaller.Id, Cid]);
                         }
                     }
                 }
             }
-            return newRels;
         }
     }
 }
@@ -302,16 +317,19 @@ namespace CCView.CardinalData.Compute
     public class RelationDatabase
     {
         public List<CC> Cardinals { get; private set; } = [];
+        public HashSet<AtomicRelation> AtomicRelations { get; private set; } = [];
         public HashSet<Relation> Relations { get; private set; } = [];
         public List<Article> Articles { get; private set; } = [];
-        private List<Model> Models { get; set; } = [];
+        public List<Theorem> Theorems { get; set; } = [];
+        public List<Model> Models { get; set; } = [];
         private List<int> CCI { get; set; } = [];
         private List<int> ArtInds { get; set; } = [];
+        private List<int> ThmInds { get; set; } = [];
         private List<int> ModInds { get; set; } = [];
         public Dictionary<(CC, CC), HashSet<CC>> Density { get; private set; } = [];
         private bool DynamicDensity { get; set; } = false;
 
-        public RelationDatabase(IEnumerable<CC> cardinals, HashSet<Relation> relations)
+        public RelationDatabase(IEnumerable<CC> cardinals, IEnumerable<Relation> relations, IEnumerable<Article> articles, IEnumerable<Theorem> theorems, IEnumerable<Model> models)
         {
             Cardinals.AddRange(cardinals);
 
@@ -323,21 +341,16 @@ namespace CCView.CardinalData.Compute
                 if (!Cardinals.Contains(relation.Item2))
                     Cardinals.Add(relation.Item2);
             }
+            Articles.AddRange(articles);
+            Theorems.AddRange(theorems);
+            Models.AddRange(models);
 
             // Initialise the CCIndex
             // Using this, Cardinals[CCI[i]] will return the CC with Id i
             CCI = InitIndexList<CC>(Cardinals, c =>c.Id, -1);
             ArtInds = InitIndexList<Article>(Articles, a => a.Id, -1);
+            ThmInds = InitIndexList<Theorem>(Theorems, t => t.Id, -1);
             ModInds = InitIndexList<Model>(Models, m => m.Id, -1);
-
-            foreach (Relation r in Relations)
-            {
-                if (r.ArticleId != -1)
-                {
-                    r.Year = Articles[ArtInds[r.ArticleId]].Date;
-                }
-            }
-
         }
         public RelationDatabase()
         {
@@ -626,6 +639,23 @@ namespace CCView.CardinalData.Compute
                 ? throw new ArgumentException($"Id {id} does not belong to a cardinal characteristic.")
                 : match;
         }
+        public Article? GetArticleById(int id)
+        {
+            Article? match = Articles[ArtInds[id]];
+            if (match.Id != id)
+            {
+                return MisalignedArtIndsandArt(id);
+            }
+            if (match != null)
+            {
+                return match;
+            }
+            else
+            {
+                Console.WriteLine($"WARNING: No article with id {id} found. Returning null.");
+                return null;
+            }
+        }
 
         public void AddRelationByIds(int id1, int id2, char type)
         {
@@ -651,9 +681,25 @@ namespace CCView.CardinalData.Compute
             // Console.WriteLine("Manually calling cardinal.");
             // return Cardinals.SingleOrDefault(c => c.Id == id);
         }
-        private int RelAge(Relation relation)
+        public Article? MisalignedArtIndsandArt(int id)
         {
-            return Articles[ArtInds[relation.ArticleId]].Date;
+            throw new InvalidOperationException("List ArtsInd and Articles are mis-aligned. This is a developer error, if you see this in typical use please submit a bug report.");
+        }
+        public void GenerateAtoms()
+        {
+            foreach (Theorem thm in Theorems.Union(Models))
+            {
+                AtomicRelations.UnionWith(GenerateAtoms(thm));
+            }
+        }
+        public static HashSet<AtomicRelation> GenerateAtoms(Theorem theorem)
+        {
+            HashSet<AtomicRelation> newAtoms = [];
+            foreach (var tup in theorem.Results)
+            {
+                newAtoms.Add(new(tup.Item1, tup.Item2, tup.Item3, theorem));
+            }
+            return newAtoms;
         }
     }
 }
