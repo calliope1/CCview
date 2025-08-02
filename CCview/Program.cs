@@ -1,12 +1,15 @@
 ﻿// Actual feature list to implement pre-web-app:
 // Modified graphs that show lines through based on a particular model
 // Exporting to TikZ
-// Implementing the 'a cannot be proved to be >= b' relation (how does this affect use?)
-// Implement an Article and Model hash list like with Cardinals
-// Logic to tell than 'a \ngeqVdash b' (with earliest possible signature)
 // A basic collection of articles, models and cardinals to test with
 // Better command line interface for plotting
-// Change (Relations, Cardinals) to (Cardinals, Relations) in functions
+// Commands to add custom articles, theorems and models
+// Completely overhaul the Relation logic to work as being built off of AtomicRelations
+// Use this to implement 'best (oldest) proof' style logic
+// Clean up some of the excess variables lying around. I think that LoadedCardinals doesn't need to exist, for example
+// Oh and make sure that we sort the List<T> things by item => item.Id, making sure to fill in blank spaces with nulls
+// Or just turn it into a dictionary?
+// OR just be more happy to FetchById
 
 // Dependencies
 // These need to be cleaned up at some point
@@ -89,7 +92,7 @@ namespace CCView
             Option<int[]> idsOption = new("--ids")
             {
                 Description = "Specify multiple ids for cardinal characteristics.",
-                DefaultValueFactory = p => env.GetIdList()
+                DefaultValueFactory = p => [.. env.Cardinals.Keys]
             };
 
             Option<bool> saveOption = new("--save")
@@ -316,7 +319,7 @@ namespace CCView
 
             listCommand.SetAction(pR =>
             {
-                foreach (CC c in env.Cardinals)
+                foreach (CC c in env.Cardinals.Values)
                 {
                     Console.WriteLine(c);
                 }
@@ -338,7 +341,7 @@ namespace CCView
 
             listArtsCommand.SetAction(pR =>
             {
-                foreach (Article a in env.Relations.Articles)
+                foreach (Article a in env.Relations.Articles.Values)
                 {
                     Console.WriteLine(a);
                 }
@@ -449,10 +452,10 @@ namespace CCView
         private List<Model> LoadedModels;
         public RelationDatabase Relations = new RelationDatabase();
         public bool Unsaved { get; private set; } = false;
-        public List<CC> Cardinals => Relations.Cardinals;
-        public List<Article> Articles => Relations.Articles;
-        public List<Theorem> Theorems => Relations.Theorems;
-        public List<Model> Models => Relations.Models;
+        public Dictionary<int, CC> Cardinals => Relations.Cardinals;
+        public Dictionary<int, Article> Articles => Relations.Articles;
+        public Dictionary<int, Theorem> Theorems => Relations.Theorems;
+        public Dictionary<int, Model> Models => Relations.Models;
 
 
         public RelationEnvironment(string ccFile, string relsFile, string dotFile, string graphFile, string artsFile, string thmsFile, string modsFile)
@@ -523,15 +526,15 @@ namespace CCView
         public void Save()
         {
             Unsaved = false;
-            JsonFileHandler.Save(CCPath, Cardinals);
+            JsonFileHandler.Save(CCPath, Cardinals.Values);
             Program.LoadLog($"Cardinals saved to {CCPath}.");
             JsonFileHandler.Save(RelsPath, Relations.Relations.ToList());
             Program.LoadLog($"Relations saved to {RelsPath}.");
-            JsonFileHandler.Save(ArtsPath, Articles);
+            JsonFileHandler.Save(ArtsPath, Articles.Values);
             Program.LoadLog($"Articles saved to {ArtsPath}.");
-            JsonFileHandler.Save(ThmsPath, Theorems);
+            JsonFileHandler.Save(ThmsPath, Theorems.Values);
             Program.LoadLog($"Theorems saved to {ThmsPath}.");
-            JsonFileHandler.Save(ModsPath, Models);
+            JsonFileHandler.Save(ModsPath, Models.Values);
             Program.LoadLog($"Models saved to {ModsPath}.");
         }
 
@@ -578,7 +581,7 @@ namespace CCView
 
         public string PlotGraphDot(int[] ids, string fileName)
         {
-            List<CC> cardinals = ids.Select(id => Relations.GetCardinalByIdOrThrow(id)).ToList();
+            List<CC> cardinals = [.. ids.Select(id => Relations.Cardinals[id])];
             var dot = GraphLogic.Vis.GraphDrawer.GenerateGraph(cardinals, Relations.GetMinimalRelations(cardinals));
             GraphLogic.Vis.GraphDrawer.WriteDotFile(dot, Path.Combine(OutDirectory, fileName));
             return dot;
@@ -587,10 +590,6 @@ namespace CCView
         public string PlotGraphDot(int[] ids)
         {
             return PlotGraphDot(ids, DotFile);
-        }
-        public int[] GetIdList()
-        {
-            return [.. Cardinals.Select(c => c.Id)];
         }
         public void PlotGraphPng(string dotFileName, string pngFileName)
         {

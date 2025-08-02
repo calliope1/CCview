@@ -113,10 +113,9 @@ namespace CCView.CardinalData
         public int Item2Id { get; set; } = -1;
         public Char Type { get; set; }
         public int TypeId { get; set; } = -1;
-        public List<AtomicRelation> Derivation { get; set; } = [];
+        public HashSet<AtomicRelation> Derivation { get; set; } = [];
         public List<int[]> DerIds { get; set; } = [];
-        public int Year { get; set; } = int.MaxValue; // Should just point to the article's year tbh, lets set up an indexing list for that
-        // Max value to be as 'young' as possible, so that relations without evidence are generally discarded in favour of those that have evidence where applicable
+        public int Age => Derivation.Select(a => a.Witness.Article.Date).Max();
         public static List<Char> TypeIndices { get; private set; } = ['>','C'];
         // '>' refers to ZFC \vdash Item1 \geq Item2
         // 'C' refers to Con(ZFC + Item1 > Item2). That is, Item2 \geq Item1 is unprovable
@@ -164,11 +163,12 @@ namespace CCView.CardinalData
             return obj is Relation other &&
                    Item1.Equals(other.Item1) &&
                    Item2.Equals(other.Item2) &&
-                   Type == other.Type;
+                   Type == other.Type &&
+                   Derivation == other.Derivation;
         }
         public override int GetHashCode()
         {
-            return HashCode.Combine(Item1, Item2, Type); // Needs overhauling
+            return HashCode.Combine(Item1, Item2, Type, Derivation); // Needs overhauling
         }
         public override string ToString()
         {
@@ -316,41 +316,42 @@ namespace CCView.CardinalData.Compute
 {
     public class RelationDatabase
     {
-        public List<CC> Cardinals { get; private set; } = [];
+        public Dictionary<int, CC> Cardinals { get; private set; } = [];
         public HashSet<AtomicRelation> AtomicRelations { get; private set; } = [];
         public HashSet<Relation> Relations { get; private set; } = [];
-        public List<Article> Articles { get; private set; } = [];
-        public List<Theorem> Theorems { get; set; } = [];
-        public List<Model> Models { get; set; } = [];
-        private List<int> CCI { get; set; } = [];
-        private List<int> ArtInds { get; set; } = [];
-        private List<int> ThmInds { get; set; } = [];
-        private List<int> ModInds { get; set; } = [];
+        public Dictionary<int, Article> Articles { get; private set; } = [];
+        public Dictionary<int, Theorem> Theorems { get; set; } = [];
+        public Dictionary<int, Model> Models { get; set; } = [];
         public Dictionary<(CC, CC), HashSet<CC>> Density { get; private set; } = [];
         private bool DynamicDensity { get; set; } = false;
 
         public RelationDatabase(IEnumerable<CC> cardinals, IEnumerable<Relation> relations, IEnumerable<Article> articles, IEnumerable<Theorem> theorems, IEnumerable<Model> models)
         {
-            Cardinals.AddRange(cardinals);
+            foreach (CC c in cardinals)
+            {
+                Cardinals[c.Id] = c;
+            }
 
             foreach (var relation in relations)
             {
                 Relations.Add(relation);
-                if (!Cardinals.Contains(relation.Item1))
-                    Cardinals.Add(relation.Item1);
-                if (!Cardinals.Contains(relation.Item2))
-                    Cardinals.Add(relation.Item2);
+                if (!Cardinals.ContainsKey(relation.Item1.Id))
+                    Cardinals[relation.Item1.Id] = relation.Item1;
+                if (!Cardinals.ContainsKey(relation.Item2.Id))
+                    Cardinals[relation.Item2.Id] = relation.Item2;
             }
-            Articles.AddRange(articles);
-            Theorems.AddRange(theorems);
-            Models.AddRange(models);
-
-            // Initialise the CCIndex
-            // Using this, Cardinals[CCI[i]] will return the CC with Id i
-            CCI = InitIndexList<CC>(Cardinals, c =>c.Id, -1);
-            ArtInds = InitIndexList<Article>(Articles, a => a.Id, -1);
-            ThmInds = InitIndexList<Theorem>(Theorems, t => t.Id, -1);
-            ModInds = InitIndexList<Model>(Models, m => m.Id, -1);
+            foreach (Article a in articles)
+            {
+                Articles[a.Id] = a;
+            }
+            foreach (Theorem t in theorems)
+            {
+                Theorems[t.Id] = t;
+            }
+            foreach (Model m in models)
+            {
+                Models[m.Id] = m;
+            }
         }
         public RelationDatabase()
         {
@@ -461,7 +462,6 @@ namespace CCView.CardinalData.Compute
         }
         public int TransClose()
         {
-            //throw new NotImplementedException();
             Console.WriteLine("HEY! Use TransitiveClosureAlgorithm from QuikGraph (if that works).");
             int n = Relations.Count();
             Relations = ComputeTransitiveClosure(Relations);
@@ -476,7 +476,7 @@ namespace CCView.CardinalData.Compute
             {
                 throw new ArgumentException("Neither cardinal may be null.");
             }
-            else if (!Cardinals.Contains(a) || !Cardinals.Contains(b))
+            else if (!Cardinals.ContainsKey(a.Id) || !Cardinals.ContainsKey(b.Id))
             {
                 throw new ArgumentException("Both cardinals must be part of the relations.");
             }
@@ -530,76 +530,64 @@ namespace CCView.CardinalData.Compute
                 }
             }
         }
-        public int NewCCId(bool fast = false)
+        public static int NewDictId<T>(Dictionary<int, T> dict, bool fast = false)
         {
             if (fast)
             {
-                return Cardinals.Count;
+                return dict.Keys.Max() + 1;
             }
             else
             {
                 var newId = 0;
-                var usedIds = new HashSet<int>(Cardinals.Select(c => c.Id));
-                while (usedIds.Contains(newId))
+                while (dict.ContainsKey(newId))
                 {
                     newId++;
                 }
                 return newId;
             }
         }
+        public int NewCCId(bool fast = false)
+        {
+            return NewDictId<CC>(Cardinals, fast);
+        }
         public int NewArtId(bool fast = false)
         {
-            if (fast)
-            {
-                return Articles.Count;
-            }
-            else
-            {
-                var newId = 0;
-                var usedIds = new HashSet<int>(Articles.Select(a => a.Id));
-                while (usedIds.Contains(newId))
-                {
-                    newId++;
-                }
-                return newId;
-            }
+            return NewDictId<Article>(Articles, fast);
         }
         public Article AddArticleIdSafe(Article article)
         {
             int id = article.Id;
-            if (id == -1 || Articles.Select(a => a.Id).Contains(id))
+            if (id == -1 || Articles.ContainsKey(id))
             {
                 article.GetNewId(this);
             }
-            Articles.Add(article);
+            Articles[article.Id] = article;
             return article;
         }
         public Article AddArticle(string? name, int date, string? citation, int id)
         {
             Article art = new(id, date, name ?? "No title provided", citation ?? "No citation provided");
-            Articles.Add(art);
+            Articles[id] = art;
             return art;
         }
         public Article AddArticle(string? name, int date, string? citation)
         {
             Article art = new(NewArtId(), date, name ?? "No title provided", citation ?? "No citation provided");
-            Articles.Add(art);
+            Articles[art.Id] = art;
             return art;
         }
         public void AddCardinal(string? name, string? symbol, int id)
         {
-            if (id < CCI.Count && CCI[id] != -1) // Order of operations is important here or you'll get errors for id >= CCI.Count
+            if (Cardinals.ContainsKey(id)) // Order of operations is important here or you'll get errors for id >= CCI.Count
             {
                 throw new ArgumentException($"ID {id} is in use by {GetCardinalById(id)}.");
             }
-            var newCardinal = new CC(id, name!, symbol!);
-            if (id >= CCI.Count)
+            else
             {
-                CCI.AddRange(Enumerable.Repeat(-1, id + 1 - CCI.Count));
+                var newCardinal = new CC(id, name!, symbol!);
+                Cardinals[id] = newCardinal; // It's important to do this before adding the cardinal
+                Console.WriteLine($"Added new cardinal: {newCardinal}");
             }
-            CCI[id] = Cardinals.Count; // It's important to do this before adding the cardinal
-            Cardinals.Add(newCardinal);
-            Console.WriteLine($"Added new cardinal: {newCardinal}");
         }
         public void AddCardinal(string? name, string? symbol, bool fast = false)
         {
@@ -617,12 +605,7 @@ namespace CCView.CardinalData.Compute
         }
         public CC? GetCardinalById(int id)
         {
-            CC? match = Cardinals[CCI[id]];
-            if (match.Id != id)
-            {
-                return MisalignedCCIandC(id);
-            }
-            if (match != null)
+            if (Cardinals.TryGetValue(id, out CC? match))
             {
                 return match;
             }
@@ -632,21 +615,9 @@ namespace CCView.CardinalData.Compute
                 return null;
             }
         }
-        public CC GetCardinalByIdOrThrow(int id)
-        {
-            CC? match = GetCardinalById(id);
-            return match == null
-                ? throw new ArgumentException($"Id {id} does not belong to a cardinal characteristic.")
-                : match;
-        }
         public Article? GetArticleById(int id)
         {
-            Article? match = Articles[ArtInds[id]];
-            if (match.Id != id)
-            {
-                return MisalignedArtIndsandArt(id);
-            }
-            if (match != null)
+            if (Articles.TryGetValue(id, out Article? match))
             {
                 return match;
             }
@@ -663,7 +634,7 @@ namespace CCView.CardinalData.Compute
         }
         public CC GetCardinalBySymbol(string symbol)
         {
-            CC? match = Cardinals.FirstOrDefault(c => c.SymbolString == symbol);
+            CC? match = Cardinals.Values.FirstOrDefault(c => c.SymbolString == symbol);
             if (match != null)
             {
                 return match;
@@ -673,21 +644,13 @@ namespace CCView.CardinalData.Compute
                 throw new ArgumentException($"No cardinal with symbol {symbol} found.");
             }
         }
-        public CC? MisalignedCCIandC(int id)
-        {
-            // Before release comment the following line and uncomment the three after
-            throw new InvalidOperationException("List CCI and Cardinals are mis-aligned. This is a developer error, if you see this in typical use please submit a bug report.");
-            // Console.WriteLine($"WARNING: List CCI is unaligned with list Cardinals. Please submit a bug report.");
-            // Console.WriteLine("Manually calling cardinal.");
-            // return Cardinals.SingleOrDefault(c => c.Id == id);
-        }
         public Article? MisalignedArtIndsandArt(int id)
         {
             throw new InvalidOperationException("List ArtsInd and Articles are mis-aligned. This is a developer error, if you see this in typical use please submit a bug report.");
         }
         public void GenerateAtoms()
         {
-            foreach (Theorem thm in Theorems.Union(Models))
+            foreach (Theorem thm in Theorems.Values.Union(Models.Values))
             {
                 AtomicRelations.UnionWith(GenerateAtoms(thm));
             }
