@@ -11,7 +11,7 @@ namespace CCView.CardinalData
 {
     public class CardinalCharacteristic : JsonCRTP<CardinalCharacteristic>
     {
-        public int Id { get; private set; } = -1;
+        //public int Id { get; private set; } = -1;
         public string Name { get; set; } = "No name assigned";
         public string SymbolString { get; set; } = "X";
         private int ArtId { get; set; } = -1;
@@ -55,7 +55,7 @@ namespace CCView.CardinalData
     }
     public class Article : JsonCRTP<Article>
     {
-        public int Id { get; private set; } = -1;
+        //public int Id { get; private set; } = -1;
         // Generally represented as YYYYMMDD, with XX = 99 if not found. MaxValue for 'no year' for simplicity
         public int Date { get; private set; } = int.MaxValue;
         public string Name { get; private set; } = "Article name required!";
@@ -92,7 +92,7 @@ namespace CCView.CardinalData
         }
         public void GetNewId(RelationDatabase rD, bool fast = false)
         {
-            this.Id = rD.NewArtId(fast);
+            this.Id = RelationDatabase.NewDictId<Article>(rD.Articles, fast);
         }
     }
 
@@ -114,7 +114,7 @@ namespace CCView.CardinalData
         public Char Type { get; set; }
         public int TypeId { get; set; } = -1;
         public HashSet<AtomicRelation> Derivation { get; set; } = [];
-        public List<int[]> DerIds { get; set; } = [];
+        public HashSet<IntFive> DerIds { get; set; } = [];
         public int Age => Derivation.Select(a => a.Witness.Article.Date).Max();
         public static List<Char> TypeIndices { get; private set; } = ['>','C'];
         // '>' refers to ZFC \vdash Item1 \geq Item2
@@ -127,28 +127,34 @@ namespace CCView.CardinalData
             Item2Id = args[1].Value<int>();
             Item1 = cardinals[Item1Id];
             Item2 = cardinals[Item2Id];
-            if (Item1.Id != Item1Id || Item2.Id != Item2Id)
-            {
-                // Before public release we'll want to instead throw a warning and then do a manual search
-                throw new ArgumentException("Cardinals list mis-indexed. Cardinal with id i must be at index i.");
-            }
             TypeId = args[2].Value<int>();
             Type = Relation.TypeIndices[TypeId];
-            DerIds = args[3].Value<List<int[]>>() ?? [];
+            foreach (JArray jArray in args[3].Cast<JArray>())
+            {
+                List<int> newList = [];
+                foreach (JToken token in jArray)
+                {
+                    newList.Add(token.Value<int>());
+                }
+                DerIds.Add(new(newList));
+            }
         }
         public Relation() { Item1 = new(); Item2 = new(); }
         public override void InstantiateFromJArray(JArray args)
         {
-            //Console.WriteLine("WARNING: You are calling Relation.InstantiateFromJArray. This will not correctly instantiate the Item1 or Item2 variables.");
             Item1Id = args[0].Value<int>();
             Item2Id = args[1].Value<int>();
-            //if (Item1.Id != Item1Id || Item2.Id != Item2Id)
-            //{
-            //    // Before public release we'll want to instead throw a warning and then do a manual search
-            //    throw new ArgumentException("Cardinals list mis-indexed. Cardinal with id i must be at index i.");
-            //}
             TypeId = args[2].Value<int>();
             Type = Relation.TypeIndices[TypeId];
+            foreach (JArray jArray in args[3].Cast<JArray>())
+            {
+                List<int> newList = [];
+                foreach (JToken token in jArray)
+                {
+                    newList.Add(token.Value<int>());
+                }
+                DerIds.Add(new(newList));
+            }
         }
         public Relation(CC item1, CC item2, char type)
         {
@@ -157,27 +163,61 @@ namespace CCView.CardinalData
             Type = type;
             TypeId = TypeIndices.IndexOf(type);
         }
+        public Relation(CC item1, CC item2, char type, IEnumerable<AtomicRelation> derivation) : this(item1, item2, type)
+        {
+            Derivation = derivation.ToHashSet();
+            DerIds = [];
+            foreach (AtomicRelation atom in derivation)
+            {
+                if (atom.Witness is Model)
+                {
+                    DerIds.Add(new(atom.Item1.Id, atom.Item2.Id, Relation.TypeIdFromChar(atom.Type), 1, atom.Witness.Id));
+                }
+                else
+                {
+                    DerIds.Add(new(atom.Item1.Id, atom.Item2.Id, Relation.TypeIdFromChar(atom.Type), 0, atom.Witness.Id));
+                }
+            }
+        }
+        public Relation(AtomicRelation atom)
+        {
+            Item1 = atom.Item1;
+            Item1Id = Item1.Id;
+            Item2 = atom.Item2;
+            Item2Id = Item2.Id;
+            Type = atom.Type;
+            TypeId = Relation.TypeIdFromChar(Type);
+            Derivation = [atom];
+            //DerIds = new HashSet<int[]>(new IntArrayComparer());
+            DerIds = [new(Item1Id, Item2Id, TypeId, (atom.Witness is Model) ? 1 : 0, atom.Witness.Id)];
+        }
 
         public override bool Equals(object? obj) // This needs to be overhauled because of 'signature's.
         {
             return obj is Relation other &&
-                   Item1.Equals(other.Item1) &&
-                   Item2.Equals(other.Item2) &&
-                   Type == other.Type &&
-                   Derivation == other.Derivation;
+            Item1.Equals(other.Item1) &&
+            Item2.Equals(other.Item2) &&
+            Type == other.Type &&
+            DerIds.SetEquals(other.DerIds);
         }
         public override int GetHashCode()
         {
-            return HashCode.Combine(Item1, Item2, Type, Derivation); // Needs overhauling
+            return HashCode.Combine(Item1, Item2, Type, DerIds); // Needs overhauling
         }
         public override string ToString()
         {
-            return $"Relation type {Type} between {Item1} and {Item2}"; // Needs overhauling
+            return $"Relation of type {Type} between ID{Item1.Id} ({Item1.SymbolString}) and ID{Item2.Id} ({Item2.SymbolString})"; // Needs overhauling
         }
         // TypeIds *could* be shorts because Char and short are both 16 bit, but this is excessive
         public static int TypeIdFromChar(Char type)
         {
-            return TypeIndices.First(x => x == type);
+            return TypeIndices.IndexOf(type);
+        }
+        public bool ResultEquals(Relation other)
+        {
+            return Item1 == other.Item1
+                && Item2 == other.Item2
+                && Type == other.Type;
         }
     }
     // "Atomic" relation that is proved directly by a single model or theorem
@@ -216,7 +256,6 @@ namespace CCView.CardinalData
     // "Atomic" unit of proof, one theorem or model that implies one or more relations directly
     public class Theorem : JsonCRTP<Theorem>
     {
-        public int Id { get; set; } = -1;
         public int ArtId { get; set; } = -1;
         public Article Article { get; set; } = null!;
         // Results is directly proved relations between cardinals in the description
@@ -230,7 +269,19 @@ namespace CCView.CardinalData
         {
             Id = args[0].Value<int>();
             ArtId = args[1].Value<int>();
-            ResIds = args[2].Value<HashSet<int[]>>() ?? [];
+            foreach (JArray jArray in args[2].Cast<JArray>())
+            {
+                List<int> newList = [];
+                foreach (JToken token in jArray)
+                {
+                    newList.Add(token.Value<int>());
+                }
+                int[] newResIds = [.. newList];
+                if (newResIds != null)
+                {
+                    ResIds.Add(newResIds);
+                }
+            }
             Description = args[3].Value<string>() ?? "No description provided.";
         }
         public override bool Equals(object? obj)
@@ -260,25 +311,33 @@ namespace CCView.CardinalData
     {
         // The idea with CardinalValues is that each set in the list is an equivalence class by equipotence
         // Then if one set comes before another, the cardinals in the first set are less than those in the second
-        public List<HashSet<CC>> Values { get; set; } = [];
-        public List<HashSet<int>> ValIds { get; set; } = [];
+        public HashSet<(CC Cardinal, int Aleph, Theorem Witness)> Values { get; set; } = [];
+        public HashSet<IntThree> ValIds { get; set; } = [];
         protected override List<string> FieldsToSave => ["Id", "Article.Id", "ResIds", "Description", "ValIds"];
         private readonly int Cid = Relation.TypeIdFromChar('C');
-        public Model(int id, Article article, HashSet<(CC, CC, char)> results, string description, List<HashSet<CC>> values)
+        public Model(int id, Article article, HashSet<(CC, CC, char)> results, string description, HashSet<(CC Cardinal, int Aleph, Theorem Witness)> values)
             : base(id, article, results, description)
         {
             Values = values;
             ArtId = article.Id;
             ResIds = Results.Select<(CC, CC, char), int[]>(r => [r.Item1.Id, r.Item2.Id, Relation.TypeIdFromChar(r.Item3)]).ToHashSet();
-            ValIds = Values.Select(v => v.Select(w => w.Id).ToHashSet()).ToList();
+            foreach ((CC Cardinal, int Aleph, Theorem Witness) tup in Values)
+            {
+                ValIds.Add(new(tup.Cardinal.Id, tup.Aleph, tup.Witness.Id));
+            }
         }
+        public Model() { }
         public override void InstantiateFromJArray(JArray args)
         {
             Id = args[0].Value<int>();
             ArtId = args[1].Value<int>();
             ResIds = args[2].Value<HashSet<int[]>>() ?? [];
             Description = args[3].Value<string>() ?? "No description provided!";
-            ValIds = args[4].Value<List<HashSet<int>>>() ?? [];
+            foreach (JArray alephArray in args[4].Cast<JArray>())
+            {
+                List<int> newList = alephArray.Value<List<int>>()!;
+                ValIds.Add(new(newList));
+            }
         }
         public override bool Equals(object? obj)
         {
@@ -294,17 +353,14 @@ namespace CCView.CardinalData
         }
         public void GenerateResults()
         {
-            for (int i = 0; i < Values.Count; i++)
+            foreach ((CC Cardinal, int Aleph, Theorem Witness) val1 in Values)
             {
-                for (int j = i + 1; j < Values.Count; j++)
+                foreach ((CC Cardinal, int Aleph, Theorem Witness) val2 in Values)
                 {
-                    foreach (CC smaller in Values[i])
+                    if (val1.Aleph < val2.Aleph)
                     {
-                        foreach (CC larger in Values[j])
-                        {
-                            Results.Add(new(larger, smaller, 'C'));
-                            ResIds.Add([larger.Id, smaller.Id, Cid]);
-                        }
+                        Results.Add(new(val2.Cardinal, val1.Cardinal, 'C'));
+                        ResIds.Add([val2.Cardinal.Id, val1.Cardinal.Id, Cid]);
                     }
                 }
             }
@@ -324,14 +380,11 @@ namespace CCView.CardinalData.Compute
         public Dictionary<int, Model> Models { get; set; } = [];
         public Dictionary<(CC, CC), HashSet<CC>> Density { get; private set; } = [];
         private bool DynamicDensity { get; set; } = false;
+        private bool TrivialRelationsCreated { get; set; } = false;
 
-        public RelationDatabase(IEnumerable<CC> cardinals, IEnumerable<Relation> relations, IEnumerable<Article> articles, IEnumerable<Theorem> theorems, IEnumerable<Model> models)
+        public RelationDatabase(Dictionary<int, CC> cardinals, IEnumerable<Relation> relations, Dictionary<int, Article> articles, Dictionary<int, Theorem> theorems, Dictionary<int, Model> models)
         {
-            foreach (CC c in cardinals)
-            {
-                Cardinals[c.Id] = c;
-            }
-
+            Cardinals = cardinals;
             foreach (var relation in relations)
             {
                 Relations.Add(relation);
@@ -340,37 +393,12 @@ namespace CCView.CardinalData.Compute
                 if (!Cardinals.ContainsKey(relation.Item2.Id))
                     Cardinals[relation.Item2.Id] = relation.Item2;
             }
-            foreach (Article a in articles)
-            {
-                Articles[a.Id] = a;
-            }
-            foreach (Theorem t in theorems)
-            {
-                Theorems[t.Id] = t;
-            }
-            foreach (Model m in models)
-            {
-                Models[m.Id] = m;
-            }
+            Articles = articles;
+            Theorems = theorems;
+            Models = models;
         }
         public RelationDatabase()
         {
-        }
-        
-        public static List<int> InitIndexList<T>(List<T> values, Func<T, int> idFinder, int defaultValue = -1)
-        {
-            if (values.Count == 0)
-            {
-                return [];
-            }
-            List<int> ids = [.. values.Select(v => idFinder(v))];
-            int maxId = ids.Max();
-            List<int> IndexingList = [.. Enumerable.Repeat(defaultValue, maxId + 1)];
-            for (int i = 0; i < ids.Count; i++)
-            {
-                IndexingList[ids[i]] = i;
-            }
-            return IndexingList;
         }
         public bool PopulateDensity()
         {
@@ -404,6 +432,21 @@ namespace CCView.CardinalData.Compute
             }
             return false;
         }
+        public void CreateTrivialRelations()
+        {
+            if (!TrivialRelationsCreated)
+            {
+                foreach (AtomicRelation a in AtomicRelations)
+                {
+                    Relation newRel = new(a);
+                    if (!Relations.Any(r => r.Equals(newRel)))
+                    {
+                        Relations.Add(new(a));
+                    }
+                }
+                TrivialRelationsCreated = true;
+            }
+        }
         public static HashSet<Relation> ComputeTransitiveClosure(IEnumerable<Relation> relation)
         {
             HashSet<Relation> newRelations = [.. relation]; // This is short for new HashSet<Relation>(relation);
@@ -417,37 +460,34 @@ namespace CCView.CardinalData.Compute
                 {
                     foreach (var relTwo in newRelations)
                     {
-                        // a C b > c implies a C c
-                        // a > b > c implies a > c
-                        // a C b > a is impossible
                         if (relOne.Type == 'C' && relTwo.Type == '>')
                         {
-                            if (relOne.Item2.Equals(relTwo.Item1)) throw new DataMisalignedException($"Relations {relOne} and {relTwo} are incompatible.");
-                        }
-                        else if (relOne.Type == 'C' && relTwo.Type == '>')
-                        {
-                            if (relOne.Item2.Equals(relTwo.Item1))
+                            // a C b > a is impossible
+                            if (relOne.Item2.Equals(relTwo.Item1)) throw new DataMisalignedException($"RelData {relOne} and {relTwo} are incompatible.");
+                            // a C b > c implies a C c
+                            else if (relOne.Item2.Equals(relTwo.Item1))
                             {
                                 testRelation.Item1 = relOne.Item1;
                                 testRelation.Item2 = relTwo.Item2;
                                 testRelation.Type = 'C';
-                                if (!newRelations.Contains(testRelation))
+                                if (!newRelations.Any(r => r.ResultEquals(testRelation)))
                                 {
-                                    newRelationsToAdd.Add(new Relation(relOne.Item1, relTwo.Item2, 'C'));
+                                    newRelationsToAdd.Add(new Relation(relOne.Item1, relTwo.Item2, 'C', relOne.Derivation.Union(relTwo.Derivation)));
                                     changed = true;
                                 }
                             }
                         }
+                        // a > b > c implies a > c
                         else if (relOne.Type == '>' && relTwo.Type == '>')
                         {
                             testRelation.Item1 = relOne.Item1;
                             testRelation.Item2 = relTwo.Item2;
                             testRelation.Type = '>';
                             if (relOne.Item2.Equals(relTwo.Item1)
-                                && !newRelations.Contains(testRelation)
+                                && !newRelations.Any(r => r.ResultEquals(testRelation))
                                 && !relOne.Item1.Equals(relTwo.Item2))
                             {
-                                newRelationsToAdd.Add(new Relation(relOne.Item1, relTwo.Item2, relOne.Type));
+                                newRelationsToAdd.Add(new Relation(relOne.Item1, relTwo.Item2, relOne.Type, relOne.Derivation.Union(relTwo.Derivation)));
                                 changed = true;
                             }
                         }
@@ -462,14 +502,12 @@ namespace CCView.CardinalData.Compute
         }
         public int TransClose()
         {
-            Console.WriteLine("HEY! Use TransitiveClosureAlgorithm from QuikGraph (if that works).");
-            int n = Relations.Count();
+            int n = Relations.Count;
             Relations = ComputeTransitiveClosure(Relations);
-            int m = Relations.Count();
+            int m = Relations.Count;
             Program.LoadLog($"Constructed {m - n} new relations in transitive closure.");
             return m - n;
         }
-
         public void AddRelation(CC? a, CC? b, char type, bool lazy = true)
         {
             if (a == null || b == null)
@@ -546,22 +584,18 @@ namespace CCView.CardinalData.Compute
                 return newId;
             }
         }
-        public int NewCCId(bool fast = false)
+        public Article AddArticle(Article article)
         {
-            return NewDictId<CC>(Cardinals, fast);
-        }
-        public int NewArtId(bool fast = false)
-        {
-            return NewDictId<Article>(Articles, fast);
-        }
-        public Article AddArticleIdSafe(Article article)
-        {
-            int id = article.Id;
-            if (id == -1 || Articles.ContainsKey(id))
+            if (article.Id == -1)
             {
-                article.GetNewId(this);
+                int newId = NewDictId<Article>(Articles);
+                article.Id = newId;
+                Articles[newId] = article;
             }
-            Articles[article.Id] = article;
+            else
+            {
+                Articles[article.Id] = article;
+            }
             return article;
         }
         public Article AddArticle(string? name, int date, string? citation, int id)
@@ -572,7 +606,7 @@ namespace CCView.CardinalData.Compute
         }
         public Article AddArticle(string? name, int date, string? citation)
         {
-            Article art = new(NewArtId(), date, name ?? "No title provided", citation ?? "No citation provided");
+            Article art = new(NewDictId<Article>(Articles), date, name ?? "No title provided", citation ?? "No citation provided");
             Articles[art.Id] = art;
             return art;
         }
@@ -591,7 +625,7 @@ namespace CCView.CardinalData.Compute
         }
         public void AddCardinal(string? name, string? symbol, bool fast = false)
         {
-            AddCardinal(name, symbol, NewCCId(fast));
+            AddCardinal(name, symbol, NewDictId<CC>(Cardinals, fast));
         }
         public bool IsRelated(CC a, CC b, char type)
         {
@@ -644,15 +678,22 @@ namespace CCView.CardinalData.Compute
                 throw new ArgumentException($"No cardinal with symbol {symbol} found.");
             }
         }
-        public Article? MisalignedArtIndsandArt(int id)
-        {
-            throw new InvalidOperationException("List ArtsInd and Articles are mis-aligned. This is a developer error, if you see this in typical use please submit a bug report.");
-        }
         public void GenerateAtoms()
         {
             foreach (Theorem thm in Theorems.Values.Union(Models.Values))
             {
                 AtomicRelations.UnionWith(GenerateAtoms(thm));
+            }
+        }
+        public void AddAtomsToRelations()
+        {
+            foreach (Relation rel in Relations)
+            {
+                foreach (IntFive der in rel.DerIds)
+                {
+
+                    throw new NotImplementedException();
+                }
             }
         }
         public static HashSet<AtomicRelation> GenerateAtoms(Theorem theorem)
@@ -663,6 +704,22 @@ namespace CCView.CardinalData.Compute
                 newAtoms.Add(new(tup.Item1, tup.Item2, tup.Item3, theorem));
             }
             return newAtoms;
+        }
+    }
+    class IntArrayComparer : IEqualityComparer<int[]>
+    {
+        public bool Equals(int[]? x, int[]? y)
+        {
+            if (x == null || y == null) return x == y;
+            return x.SequenceEqual(y);
+        }
+        public int GetHashCode(int[] obj)
+        {
+            if (obj == null) return 0;
+            unchecked
+            {
+                return HashCode.Combine(obj.ToList());
+            }
         }
     }
 }

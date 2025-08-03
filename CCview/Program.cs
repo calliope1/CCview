@@ -10,6 +10,7 @@
 // Oh and make sure that we sort the List<T> things by item => item.Id, making sure to fill in blank spaces with nulls
 // Or just turn it into a dictionary?
 // OR just be more happy to FetchById
+// Make JsonFileHandler.Load automatically create a dictionary and handle relations separately
 
 // Dependencies
 // These need to be cleaned up at some point
@@ -175,17 +176,19 @@ namespace CCView
             rootCommand.Options.Add(fromShellOption);
 
             // Add cardinal
-            Command createCCCommand = new("create", "Create a new cardinal characteristic.")
+            Command createCommand = new("create", "Create a new specified object.");
+            createCommand.Aliases.Add("add");
+
+            Command createCC = new("cardinal", "Create a new cardinal characteristic.")
             {
                 idOption,
                 saveOption,
                 nameArgument,
                 symbolArgument
             };
-            createCCCommand.Aliases.Add("add");
-            rootCommand.Subcommands.Add(createCCCommand);
+            createCommand.Subcommands.Add(createCC);
 
-            createCCCommand.SetAction(parseResult =>
+            createCC.SetAction(parseResult =>
             {
                 string? name = parseResult.GetValue(nameArgument);
                 string? symbol = parseResult.GetValue(symbolArgument);
@@ -213,7 +216,7 @@ namespace CCView
                 dateOption,
                 citationOption
             };
-            createCCCommand.Subcommands.Add(createArticle);
+            createCommand.Subcommands.Add(createArticle);
             createArticle.SetAction(pR =>
             {
                 string name = pR.GetValue(nameArgument) ?? "No name provided!";
@@ -231,14 +234,14 @@ namespace CCView
             });
 
             // Add relation
-            Command relateCommand = new("relate", "Add a relation between two cardinals.")
+            Command createRelation = new("relation", "Add a relation between two cardinals.")
             {
                 idsArgument,
                 typeOption
             };
-            rootCommand.Subcommands.Add(relateCommand);
+            createCommand.Subcommands.Add(createRelation);
 
-            relateCommand.SetAction(pR =>
+            createRelation.SetAction(pR =>
             {
                 int[] ids = pR.GetValue(idsArgument)!; // ! here is the null-forgiving operator, which is okay because we know that it is never null
                 string typeString = pR.GetValue(typeOption) ?? "X";
@@ -246,31 +249,53 @@ namespace CCView
                 env.RelateCardinals(ids[0], ids[1], type);
                 if (Program._loadLog)
                 {
-                    var c1 = env.Relations.GetCardinalById(ids[0]);
-                    var c2 = env.Relations.GetCardinalById(ids[1]);
+                    var c1 = env.RelData.GetCardinalById(ids[0]);
+                    var c2 = env.RelData.GetCardinalById(ids[1]);
                     Console.WriteLine($"Cardinals {c1} and {c2} related with type '{type}' relation.");
                 }
             });
 
             // Add relation by symbol string
-            Command relateSymbolCommand = new("relateSymbol", "Add a relation between two cardinals by their symbols.")
+            Command relateSymbolCommand = new("relationbysymbol", "Add a relation between two cardinals by their symbols.")
             {
                 symbolsArgument,
                 typeOption
             };
-            rootCommand.Subcommands.Add(relateSymbolCommand);
+            createCommand.Subcommands.Add(relateSymbolCommand);
 
-            relateSymbolCommand.Aliases.Add("rs");
+            relateSymbolCommand.Aliases.Add("rbs");
 
             relateSymbolCommand.SetAction(pR =>
             {
                 string[] symbols = pR.GetValue(symbolsArgument)!;
                 string typeString = pR.GetValue(typeOption) ?? "X";
                 char type = typeString[0];
-                CC Item1 = env.Relations.GetCardinalBySymbol(symbols[0]);
-                CC Item2 = env.Relations.GetCardinalBySymbol(symbols[1]);
+                CC Item1 = env.RelData.GetCardinalBySymbol(symbols[0]);
+                CC Item2 = env.RelData.GetCardinalBySymbol(symbols[1]);
                 env.RelateCardinals(Item1.Id, Item2.Id, type);
                 Program.LoadLog($"Cardinals {Item1} and {Item2} related with type '{type}' relation.");
+            });
+
+            // Add empty article
+            Command createBlankArticle = new("barticle", "Add an empty article");
+            createCommand.Subcommands.Add(createBlankArticle);
+
+            createBlankArticle.SetAction(pR =>
+            {
+                env.AddArticle("Test", 99999999, "Test");
+                Console.WriteLine("Added test article.");
+            });
+
+            // Add placeholder theorem
+            Command createPlaceholderTheorem = new("ptheorem", "Add a placeholder theorem");
+            createCommand.Subcommands.Add(createPlaceholderTheorem);
+
+            createPlaceholderTheorem.SetAction(pR =>
+            {
+                int newId = RelationDatabase.NewDictId(env.Theorems);
+                Theorem newTheorem = new(newId, env.Articles[0], [(env.RelData.GetCardinalBySymbol("D"), env.RelData.GetCardinalBySymbol("Item2Id"), '>'),
+                    (env.RelData.GetCardinalBySymbol("Item2Id"), env.RelData.GetCardinalBySymbol("add(M)"), '>')], "Test");
+                env.Theorems[newId] = newTheorem;
             });
 
             // Compute transitive closure
@@ -313,11 +338,13 @@ namespace CCView
                 }
             });
 
-            // List cardinals
-            Command listCommand = new("list", "List all cardinal characteristics.");
-            rootCommand.Subcommands.Add(listCommand);
+            // List objects
+            Command listCommand = new("list", "List all objects of a particular type");
 
-            listCommand.SetAction(pR =>
+            Command listCC = new("list", "List all cardinal characteristics.");
+            listCommand.Subcommands.Add(listCC);
+
+            listCC.SetAction(pR =>
             {
                 foreach (CC c in env.Cardinals.Values)
                 {
@@ -325,23 +352,23 @@ namespace CCView
                 }
             });
 
-            Command listRelsCommand = new("relations", "List of relations between cardinal characteristics.");
-            listCommand.Subcommands.Add(listRelsCommand);
+            Command listRels = new("relations", "List of relations between cardinal characteristics.");
+            listCommand.Subcommands.Add(listRels);
 
-            listRelsCommand.SetAction(pR =>
+            listRels.SetAction(pR =>
             {
-                foreach (Relation r in env.Relations.Relations)
+                foreach (Relation r in env.RelData.Relations)
                 {
                     Console.WriteLine(r);
                 }
             });
 
-            Command listArtsCommand = new("articles", "List of articles in the database.");
-            listCommand.Subcommands.Add(listArtsCommand);
+            Command listArts = new("articles", "List of articles in the database.");
+            listCommand.Subcommands.Add(listArts);
 
-            listArtsCommand.SetAction(pR =>
+            listArts.SetAction(pR =>
             {
-                foreach (Article a in env.Relations.Articles.Values)
+                foreach (Article a in env.RelData.Articles.Values)
                 {
                     Console.WriteLine(a);
                 }
@@ -379,7 +406,7 @@ namespace CCView
             citeCommand.SetAction(pR =>
             {
                 int id = pR.GetValue(idArgument);
-                Article? art = env.Relations.GetArticleById(id);
+                Article? art = env.RelData.GetArticleById(id);
                 if (art == null)
                 {
                     Console.WriteLine($"No article of ID {id} exists.");
@@ -445,17 +472,18 @@ namespace CCView
         public string DotPath { get; set; }
         public string GraphPath { get; set; }
 
-        private List<CC> LoadedCardinals;
-        private HashSet<Relation> LoadedRelations;
-        private List<Article> LoadedArticles;
-        private List<Theorem> LoadedTheorems;
-        private List<Model> LoadedModels;
-        public RelationDatabase Relations = new RelationDatabase();
+        //private Dictionary<int, CC> LoadedCardinals = [];
+        //private HashSet<Relation> LoadedRelations;
+        //private Dictionary<int, Article> LoadedArticles;
+        //private Dictionary<int, Theorem> LoadedTheorems;
+        //private Dictionary<int, Model> LoadedModels;
+        public RelationDatabase RelData = new RelationDatabase();
         public bool Unsaved { get; private set; } = false;
-        public Dictionary<int, CC> Cardinals => Relations.Cardinals;
-        public Dictionary<int, Article> Articles => Relations.Articles;
-        public Dictionary<int, Theorem> Theorems => Relations.Theorems;
-        public Dictionary<int, Model> Models => Relations.Models;
+        public Dictionary<int, CC> Cardinals => RelData.Cardinals;
+        public Dictionary<int, Article> Articles => RelData.Articles;
+        public Dictionary<int, Theorem> Theorems => RelData.Theorems;
+        public Dictionary<int, Model> Models => RelData.Models;
+        public HashSet<Relation> Relations => RelData.Relations;
 
 
         public RelationEnvironment(string ccFile, string relsFile, string dotFile, string graphFile, string artsFile, string thmsFile, string modsFile)
@@ -466,7 +494,7 @@ namespace CCView
             OutDirectory = Path.GetFullPath(Path.Combine(BaseDirectory, @"../../../output/"));
 
             CCFile = AddExtension(ccFile, ".json", "Cardinal characteristics file");
-            RelsFile = AddExtension(relsFile, ".json", "Relations file");
+            RelsFile = AddExtension(relsFile, ".json", "RelData file");
             DotFile = AddExtension(dotFile, ".dot", "Dot file");
             GraphFile = AddExtension(graphFile, ".png", "Graph file");
             ArtsFile = AddExtension(artsFile, ".json", "Articles file");
@@ -483,17 +511,21 @@ namespace CCView
 
             //LoadedCardinals = JsonInterface.LoadCardinals(CCPath);
             Program.LoadLog("Loading cardinals.");
-            LoadedCardinals = JsonFileHandler.Load<CC>(CCPath);
-            Program.LoadLog("Loading relations.");
-            LoadedRelations = JsonFileHandler.LoadRelations(RelsPath, LoadedCardinals).ToHashSet();
+            var LoadedCardinals = JsonFileHandler.Load<CC>(CCPath);
             Program.LoadLog("Loading articles.");
-            LoadedArticles = JsonFileHandler.Load<Article>(ArtsPath);
+            var LoadedArticles = JsonFileHandler.Load<Article>(ArtsPath);
             Program.LoadLog("Loading theorems.");
-            LoadedTheorems = JsonFileHandler.LoadTheorems(ThmsPath, LoadedCardinals, LoadedArticles);
+            // LoadedCardinals.Values.ToList() is a bad solution for the moment
+            var LoadedTheorems = JsonFileHandler.LoadTheorems(ThmsPath, LoadedCardinals, LoadedArticles);
             Program.LoadLog("Loading models.");
-            LoadedModels = JsonFileHandler.LoadModels(ModsPath, LoadedCardinals, LoadedArticles);
+            var LoadedModels = JsonFileHandler.LoadModels(ModsPath, LoadedCardinals, LoadedArticles, LoadedTheorems);
+            Program.LoadLog("Loading relations.");
+            var LoadedRelations = JsonFileHandler.LoadRelations(RelsPath, LoadedCardinals, LoadedTheorems, LoadedModels);
             Program.LoadLog("Creating Relation Database environment.");
-            Relations = new RelationDatabase(LoadedCardinals, LoadedRelations, LoadedArticles, LoadedTheorems, LoadedModels);
+            RelData = new RelationDatabase(LoadedCardinals, LoadedRelations, LoadedArticles, LoadedTheorems, LoadedModels);
+            Program.LoadLog("Populating atomic relations.");
+            RelData.GenerateAtoms();
+            RelData.CreateTrivialRelations();
             Program.LoadLog("Relation Environment complete.");
         }
 
@@ -528,8 +560,8 @@ namespace CCView
             Unsaved = false;
             JsonFileHandler.Save(CCPath, Cardinals.Values);
             Program.LoadLog($"Cardinals saved to {CCPath}.");
-            JsonFileHandler.Save(RelsPath, Relations.Relations.ToList());
-            Program.LoadLog($"Relations saved to {RelsPath}.");
+            JsonFileHandler.Save(RelsPath, RelData.Relations.ToList());
+            Program.LoadLog($"RelData saved to {RelsPath}.");
             JsonFileHandler.Save(ArtsPath, Articles.Values);
             Program.LoadLog($"Articles saved to {ArtsPath}.");
             JsonFileHandler.Save(ThmsPath, Theorems.Values);
@@ -540,27 +572,27 @@ namespace CCView
 
         public void AddCardinal(string? name, string? symbol, int id)
         {
-            Relations.AddCardinal(name, symbol, id);
+            RelData.AddCardinal(name, symbol, id);
             Unsaved = true;
         }
         public void AddCardinal(string? name, string? symbol)
         {
-            Relations.AddCardinal(name, symbol);
+            RelData.AddCardinal(name, symbol);
             Unsaved = true;
         }
         public void RelateCardinals(int idOne, int idTwo, char type)
         {
-            Relations.AddRelationByIds(idOne, idTwo, type);
+            RelData.AddRelationByIds(idOne, idTwo, type);
             Unsaved = true;
         }
         public void AddArticle(string name, int date, string citation, int id)
         {
-            Relations.AddArticle(name, date, citation, id);
+            RelData.AddArticle(name, date, citation, id);
             Unsaved = true;
         }
         public void AddArticle(string name, int date, string citation)
         {
-            Relations.AddArticle(name, date, citation);
+            RelData.AddArticle(name, date, citation);
             Unsaved = true;
         }
         public async Task ImportArticle(int zb)
@@ -569,20 +601,20 @@ namespace CCView
             Console.WriteLine($"Attempting to access {url}.");
             string json = await InteractiveShell.GETString(url);
             Article article = JsonFileHandler.DeserializeArticle(json);
-            Relations.AddArticleIdSafe(article);
+            RelData.AddArticle(article);
             Console.WriteLine($"New article {article} added.");
             Unsaved = true;
         }
         public void TransClose()
         {
-            int numNewRels = Relations.TransClose();
+            int numNewRels = RelData.TransClose();
             if (numNewRels > 0) Unsaved = true;
         }
 
         public string PlotGraphDot(int[] ids, string fileName)
         {
-            List<CC> cardinals = [.. ids.Select(id => Relations.Cardinals[id])];
-            var dot = GraphLogic.Vis.GraphDrawer.GenerateGraph(cardinals, Relations.GetMinimalRelations(cardinals));
+            List<CC> cardinals = [.. ids.Select(id => RelData.Cardinals[id])];
+            var dot = GraphLogic.Vis.GraphDrawer.GenerateGraph(cardinals, RelData.GetMinimalRelations(cardinals));
             GraphLogic.Vis.GraphDrawer.WriteDotFile(dot, Path.Combine(OutDirectory, fileName));
             return dot;
         }
@@ -601,7 +633,7 @@ namespace CCView
         }
         public void PopulateDensity()
         {
-            if (Relations.PopulateDensity()) Unsaved = true;
+            if (RelData.PopulateDensity()) Unsaved = true;
         }
     }
     public class InteractiveShell
