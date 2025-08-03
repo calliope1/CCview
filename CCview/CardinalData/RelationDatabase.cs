@@ -116,7 +116,6 @@ namespace CCView.CardinalData
         public HashSet<AtomicRelation> Derivation { get; set; } = [];
         public HashSet<IntFive> DerIds { get; set; } = [];
         public int Age => Derivation.Select(a => a.Witness.Article.Date).Max();
-        public static List<Char> TypeIndices { get; private set; } = ['>','C'];
         // '>' refers to ZFC \vdash Item1 \geq Item2
         // 'C' refers to Con(ZFC + Item1 > Item2). That is, Item2 \geq Item1 is unprovable
         protected override List<string> FieldsToSave => ["Item1.Id", "Item2.Id", "TypeId", "DerIds"];
@@ -128,7 +127,7 @@ namespace CCView.CardinalData
             Item1 = cardinals[Item1Id];
             Item2 = cardinals[Item2Id];
             TypeId = args[2].Value<int>();
-            Type = Relation.TypeIndices[TypeId];
+            Type = Sentence.TypeIndices[TypeId];
             foreach (JArray jArray in args[3].Cast<JArray>())
             {
                 List<int> newList = [];
@@ -145,7 +144,7 @@ namespace CCView.CardinalData
             Item1Id = args[0].Value<int>();
             Item2Id = args[1].Value<int>();
             TypeId = args[2].Value<int>();
-            Type = Relation.TypeIndices[TypeId];
+            Type = Sentence.TypeIndices[TypeId];
             foreach (JArray jArray in args[3].Cast<JArray>())
             {
                 List<int> newList = [];
@@ -161,7 +160,7 @@ namespace CCView.CardinalData
             Item1 = item1;
             Item2 = item2;
             Type = type;
-            TypeId = TypeIndices.IndexOf(type);
+            TypeId = Sentence.TypeIndices.IndexOf(type);
         }
         public Relation(CC item1, CC item2, char type, IEnumerable<AtomicRelation> derivation) : this(item1, item2, type)
         {
@@ -171,11 +170,11 @@ namespace CCView.CardinalData
             {
                 if (atom.Witness is Model)
                 {
-                    DerIds.Add(new(atom.Item1.Id, atom.Item2.Id, Relation.TypeIdFromChar(atom.Type), 1, atom.Witness.Id));
+                    DerIds.Add(new(atom.Item1.Id, atom.Item2.Id, Sentence.TypeIdFromChar(atom.Type), 1, atom.Witness.Id));
                 }
                 else
                 {
-                    DerIds.Add(new(atom.Item1.Id, atom.Item2.Id, Relation.TypeIdFromChar(atom.Type), 0, atom.Witness.Id));
+                    DerIds.Add(new(atom.Item1.Id, atom.Item2.Id, Sentence.TypeIdFromChar(atom.Type), 0, atom.Witness.Id));
                 }
             }
         }
@@ -186,7 +185,7 @@ namespace CCView.CardinalData
             Item2 = atom.Item2;
             Item2Id = Item2.Id;
             Type = atom.Type;
-            TypeId = Relation.TypeIdFromChar(Type);
+            TypeId = Sentence.TypeIdFromChar(Type);
             Derivation = [atom];
             //DerIds = new HashSet<int[]>(new IntArrayComparer());
             DerIds = [new(Item1Id, Item2Id, TypeId, (atom.Witness is Model) ? 1 : 0, atom.Witness.Id)];
@@ -208,11 +207,6 @@ namespace CCView.CardinalData
         {
             return $"Relation of type {Type} between ID{Item1.Id} ({Item1.SymbolString}) and ID{Item2.Id} ({Item2.SymbolString})"; // Needs overhauling
         }
-        // TypeIds *could* be shorts because Char and short are both 16 bit, but this is excessive
-        public static int TypeIdFromChar(Char type)
-        {
-            return TypeIndices.IndexOf(type);
-        }
         public bool ResultEquals(Relation other)
         {
             return Item1 == other.Item1
@@ -220,37 +214,129 @@ namespace CCView.CardinalData
                 && Type == other.Type;
         }
     }
+    // The "Sentence" is the most fundamental statement about cardinal characteristics
+    // It is not saved, but it serves as the way of understanding how two cardinals are being related
+    public class Sentence : JsonToArray
+    {
+        public char Type { get; set; } = 'X';
+        public List<int> Ids { get; set; } = [];
+        /// <summary>
+        /// Type, Ids:
+        /// >, [x.Id, y.Id] means 'CC x, CC y, and ZFC proves x \geq y'
+        /// C, [x.Id, y.Id] means 'CC x, CC y, and Con(ZFC + x > y)'
+        /// X, [any] means 'You forgot to assign a Type'
+        /// V, [x.Id, n, m.Id] means 'CC x, Model m, and m \models x = \aleph_n'
+        /// </summary>
+        public static List<Char> TypeIndices { get; private set; } = ['>', 'C', 'X', 'V'];
+        public Sentence() { }
+        public Sentence(char type, List<int> ids)
+        {
+            Type = type;
+            Ids = ids;
+            switch (Type)
+            {
+                case '>':
+                    if (Ids.Count != 2) throw new ArgumentException("Ids for a '>' type sentence must be two Ids of cardinal characteristics.");
+                    break;
+                case 'C':
+                    if (Ids.Count != 2) throw new ArgumentException("Ids for a '>' type sentence must be two Ids of cardinal characteristics.");
+                    break;
+                case 'X':
+                    Console.WriteLine("Warning: You have instantiated a new type 'X' sentence.");
+                    break;
+                case 'V':
+                    if (Ids.Count != 3) throw new ArgumentException("Ids for a 'V' type sentence must be one cardinal id, one number and one model id.");
+                    break;
+            }
+        }
+        public override JArray TurnToJson()
+        {
+            JArray jArray = [Sentence.TypeIdFromChar(Type)];
+            JArray subArray = [];
+            foreach (int i in Ids)
+            {
+                subArray.Add(JObject.FromObject(i));
+            }
+            jArray.Add(subArray);
+            return jArray;
+        }
+        public static Sentence FromJArray(JArray args)
+        {
+            return new(Sentence.TypeIndices[args[0].Value<int>()], args[1].Value<List<int>>() ?? []);
+        }
+        public override bool Equals(object? obj)
+        {
+            return obj is Sentence other
+                && Type == other.Type
+                && Enumerable.SequenceEqual(Ids, other.Ids);
+        }
+        public override int GetHashCode()
+        {
+            HashCode hash = new();
+            hash.Add(Type);
+            foreach (int id in Ids)
+            {
+                hash.Add(id);
+            }
+            return hash.ToHashCode();
+        }
+        public override string ToString()
+        {
+            string toString = $"Sentence {Type} for ids [";
+            if (Ids.Count > 0)
+            {
+                foreach (int id in Ids)
+                {
+                    toString += id.ToString() + ", ";
+                }
+                // We definitely have at least two characters, but lets be safe
+                toString = toString.Substring(0, Math.Max(0, toString.Length - 2));
+            }
+            return toString;
+        }
+        // TypeIds *could* be shorts because char and short are both 16 bit, but this is excessive
+        public static int TypeIdFromChar(Char type)
+        {
+            return TypeIndices.IndexOf(type);
+        }
+    }
     // "Atomic" relation that is proved directly by a single model or theorem
     // AtomicRelations (and Relations) then derive further Relations that have a witnessing signature of atomic relations
-    public class AtomicRelation
+    public class AtomicRelation : JsonToArray
     {
+        public Sentence Statement { get; set; } = new();
         public CC Item1 { get; set; } = new();
         public CC Item2 { get; set; } = new();
-        public Char Type { get; set; } = 'X';
+        public Char Type => Statement.Type;
         public Theorem Witness { get; set; } = new();
         public AtomicRelation(CC item1, CC item2, char type, Theorem witness)
         {
             Item1 = item1;
             Item2 = item2;
-            Type = type;
             Witness = witness;
+            Statement = new(type, [item1.Id, item2.Id]);
         }
         public AtomicRelation() { }
+        public override JArray TurnToJson()
+        {
+            JArray jArray = [JObject.FromObject(Witness.Id)];
+            jArray.Add(Statement.TurnToJson());
+            return jArray;
+        }
         public override bool Equals(object? obj)
         {
             return obj is AtomicRelation other
-                && other.Item1.Equals(Item1)
-                && other.Item2.Equals(Item2)
-                && other.Type.Equals(Type)
+                && other.Statement.Equals(Statement)
                 && other.Witness.Equals(Witness);
         }
         public override int GetHashCode()
         {
-            return HashCode.Combine(Item1, Item2, Type, Witness);
+            return HashCode.Combine(Statement, Witness);
         }
         public override string ToString()
         {
-            return $"Relation ID{Item1.Id} {Type} ID{Item2.Id} from ID{Witness.Id}";
+            // This'll need to be fixed
+            return $"Relation {Statement} from ID{Witness.Id}";
         }
     }
     // "Atomic" unit of proof, one theorem or model that implies one or more relations directly
@@ -303,7 +389,7 @@ namespace CCView.CardinalData
             Results = results;
             Description = description;
             ArtId = Article.Id;
-            ResIds = Results.Select<(CC, CC, char), int[]>(r => [r.Item1.Id, r.Item2.Id, Relation.TypeIdFromChar(r.Item3)]).ToHashSet();
+            ResIds = Results.Select<(CC, CC, char), int[]>(r => [r.Item1.Id, r.Item2.Id, Sentence.TypeIdFromChar(r.Item3)]).ToHashSet();
         }
         public Theorem() { }
     }
@@ -314,13 +400,13 @@ namespace CCView.CardinalData
         public HashSet<(CC Cardinal, int Aleph, Theorem Witness)> Values { get; set; } = [];
         public HashSet<IntThree> ValIds { get; set; } = [];
         protected override List<string> FieldsToSave => ["Id", "Article.Id", "ResIds", "Description", "ValIds"];
-        private readonly int Cid = Relation.TypeIdFromChar('C');
+        private readonly int Cid = Sentence.TypeIdFromChar('C');
         public Model(int id, Article article, HashSet<(CC, CC, char)> results, string description, HashSet<(CC Cardinal, int Aleph, Theorem Witness)> values)
             : base(id, article, results, description)
         {
             Values = values;
             ArtId = article.Id;
-            ResIds = Results.Select<(CC, CC, char), int[]>(r => [r.Item1.Id, r.Item2.Id, Relation.TypeIdFromChar(r.Item3)]).ToHashSet();
+            ResIds = Results.Select<(CC, CC, char), int[]>(r => [r.Item1.Id, r.Item2.Id, Sentence.TypeIdFromChar(r.Item3)]).ToHashSet();
             foreach ((CC Cardinal, int Aleph, Theorem Witness) tup in Values)
             {
                 ValIds.Add(new(tup.Cardinal.Id, tup.Aleph, tup.Witness.Id));

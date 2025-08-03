@@ -63,7 +63,7 @@ namespace CCView.JsonHandler
                 instance.InstantiateFromJArray(item);
                 instance.Item1 = cardinals[instance.Item1Id];
                 instance.Item2 = cardinals[instance.Item2Id];
-                instance.Type = Relation.TypeIndices[instance.TypeId];
+                instance.Type = Sentence.TypeIndices[instance.TypeId];
                 foreach (IntFive der in instance.DerIds)
                 {
                     if (der.ThmFlag == 0)
@@ -115,7 +115,7 @@ namespace CCView.JsonHandler
                         throw new ArgumentException($"The result ids array of a theorem in {path} does not have three elements.");
                     }
                     Console.WriteLine("Check here that res has exactly three members.");
-                    thm.Results.Add((cardinals[res[0]], cardinals[res[1]], Relation.TypeIndices[res[2]]));
+                    thm.Results.Add((cardinals[res[0]], cardinals[res[1]], Sentence.TypeIndices[res[2]]));
                 }
             }
             return theorems;
@@ -240,7 +240,12 @@ namespace CCView.JsonHandler
                 PropertyInfo finalProp = currentType.GetProperty(finalPropName)!;
                 if (finalProp == null) continue;
                 object value = finalProp.GetValue(currentObject)!;
-                if (value is IntFive intFive)
+                Type T = value.GetType();
+                if (value is JsonToArray jta)
+                {
+                    jsonArray.Add(jta.TurnToJson());
+                }
+                else if (value is IntFive intFive)
                 {
                     jsonArray.Add(JArray.FromObject(intFive.ToList()));
                 }
@@ -265,6 +270,11 @@ namespace CCView.JsonHandler
             }
             return jsonList;
         }
+    }
+    // This is for objects that want to be turned to JArrays but aren't directly being saved, such as Sentences
+    public abstract class JsonToArray
+    {
+        public abstract JArray TurnToJson();
     }
 
     public readonly struct IntFive : IEquatable<IntFive>
