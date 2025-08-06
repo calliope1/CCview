@@ -22,6 +22,7 @@ namespace CCView.JsonHandler
             File.WriteAllText(path, json);
             return json;
         }
+        public static string Save<T>(string path, Dictionary<int, T> dict) where T : JsonCRTP<T> => Save<T>(path, dict.Values);
         public static List<JArray> LoadJsonData(string path)
         {
             using StreamReader r = new(path);
@@ -53,10 +54,10 @@ namespace CCView.JsonHandler
             }
             return values;
         }
-        public static HashSet<Relation> LoadRelations(string path, Dictionary<int, Theorem> theorems)
+        public static Dictionary<int, Relation> LoadRelations(string path, Dictionary<int, Theorem> theorems)
         {
             List<JArray> data = LoadJsonData(path);
-            HashSet<Relation> relations = [];
+            Dictionary<int, Relation> relations = [];
             foreach (JArray item in data)
             {
                 Relation newRel = new();
@@ -65,7 +66,7 @@ namespace CCView.JsonHandler
                 {
                     atom.Witness = theorems[atom.WitnessId];
                 }
-                relations.Add(newRel);
+                relations[newRel.Id] = newRel;
             }
             return relations;
         }

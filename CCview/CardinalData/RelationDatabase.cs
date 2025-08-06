@@ -310,6 +310,7 @@ namespace CCView.CardinalData
                 }
                 // We definitely have at least two characters, but lets be safe
                 toString = toString.Substring(0, Math.Max(0, toString.Length - 2));
+                toString += "]";
             }
             return toString;
         }
@@ -419,7 +420,12 @@ namespace CCView.CardinalData
         public char Type => Statement.Type;
         public int Age => Derivation.Count > 0 ? Derivation.Select(a => a.Witness.Article.Date).Max() : int.MaxValue;
         public List<int> Ids => Statement.Ids;
-        protected override List<string> FieldsToSave => ["Statement", "Derivation"];
+        protected override List<string> FieldsToSave => ["Id", "Statement", "Derivation"];
+        public int Item1Id => Statement.GetItem1();
+        public int Item2Id => Statement.GetItem2();
+        public int ModelId => Statement.GetModel();
+        public int CardinalId => Statement.GetCC();
+        public int Aleph => Statement.GetAleph();
         public Relation() { }
         public Relation(Sentence statement, HashSet<AtomicRelation>[] derivations)
         {
@@ -433,14 +439,16 @@ namespace CCView.CardinalData
         public Relation(Sentence statement, HashSet<AtomicRelation> derivation) : this(statement, [derivation]) { }
         public override void InstantiateFromJArray(JArray args)
         {
-            Statement = Sentence.FromJArray((JArray)args[0]);
-            foreach (JArray jArray in args[1].Cast<JArray>())
+            Id = args[0].Value<int>();
+            Statement = Sentence.FromJArray((JArray)args[1]);
+            foreach (JArray jArray in args[2].Cast<JArray>())
             {
                 Derivation.Add(AtomicRelation.FromJArray(jArray));
             }
         }
-        public Relation(AtomicRelation atom)
+        public Relation(AtomicRelation atom, int id)
         {
+            Id = id;
             Statement = atom.Statement;
             Derivation = [atom];
         }
@@ -478,15 +486,42 @@ namespace CCView.CardinalData
         {
             if (Sentence.CtoCTypes.Contains(Statement.Type))
             {
-                return $"Relation ID{Statement.GetItem1()} {Type} ID{Statement.GetItem2()} ({Derivation.Count} length proof)";
+                return $"Relation ID{Item1Id} {Type} ID{Item2Id} ({Derivation.Count} length proof, ID{Id})";
             }
             else if (Sentence.MCNTypes.Contains(Statement.Type))
             {
-                return $"Relation ID{Statement.GetModel()} models ID{Statement.GetCC} {Type} ID{Statement.GetAleph()} ({Derivation.Count} length proof)";
+                return $"Relation ID{ModelId} models ID{CardinalId} {Type} Aleph_{Aleph} ({Derivation.Count} length proof, ID{Id})";
             }
             else
             {
-                return $"Relation {Statement}";
+                return $"Relation type {Type} with statement {Statement} ({Derivation.Count} length proof, ID{Id})";
+            }
+        }
+        public string ToStringBySymbol(RelationDatabase rd)
+        {
+            if (Sentence.CtoCTypes.Contains(Type))
+            {
+                string Item1Symbol = rd.GetCardinalById(Item1Id)!.SymbolString ?? "[no symbol]";
+                string Item2Symbol = rd.GetCardinalById(Item2Id)!.SymbolString ?? "[no symbol]";
+                if (Type == 'C')
+                {
+                    return $"Relation Con(ZFC + {Item1Symbol} > {Item2Symbol} ({Derivation.Count} length proof, ID{Id})";
+                    }
+                return $"Relation {Item1Symbol} {Type} {Item2Symbol} ({Derivation.Count} length proof, ID{Id})";
+            }
+            else if (Sentence.MCNTypes.Contains(Type))
+            {
+                string ModelDescription = rd.GetModelById(ModelId)!.Description ?? "[no description]";
+                string CardinalSymbol = rd.GetCardinalById(CardinalId)!.SymbolString ?? "[no symbol]";
+                string typeSymbol = "";
+                if (Type == 'L') typeSymbol = "<=";
+                else if (Type == 'G') typeSymbol = ">=";
+                else if (Type == 'V') typeSymbol = "=";
+                return $"Relation {ModelDescription} models {CardinalSymbol} {typeSymbol} Aleph_{Aleph} ({Derivation.Count} length proof, ID{Id})";
+            }
+            else
+            {
+                return $"Relation type {Type} with statement {Statement} ({Derivation.Count} length proof, ID{Id})";
             }
         }
         public bool ResultEquals(Relation other)
@@ -736,19 +771,18 @@ namespace CCView.CardinalData.Compute
     {
         public Dictionary<int, CC> Cardinals { get; private set; } = [];
         public HashSet<AtomicRelation> AtomicRelations { get; private set; } = [];
-        public HashSet<Relation> Relations { get; private set; } = [];
+        public Dictionary<int, Relation> Relations { get; private set; } = [];
         public Dictionary<int, Article> Articles { get; private set; } = [];
         public Dictionary<int, Theorem> Theorems { get; set; } = [];
         public Dictionary<int, Model> Models { get; set; } = [];
         public Dictionary<(CC, CC), HashSet<CC>> Density { get; private set; } = [];
-        private bool DynamicDensity { get; set; } = false;
+        public bool DynamicDensity { get; private set; } = false;
         private bool TrivialRelationsCreated { get; set; } = false;
 
-        public RelationDatabase(Dictionary<int, CC> cardinals, IEnumerable<Relation> relations, Dictionary<int, Article> articles, Dictionary<int, Theorem> theorems, Dictionary<int, Model> models)
+        public RelationDatabase(Dictionary<int, CC> cardinals, Dictionary<int, Relation> relations, Dictionary<int, Article> articles, Dictionary<int, Theorem> theorems, Dictionary<int, Model> models)
         {
             Cardinals = cardinals;
-            if (relations is HashSet<Relation> hash) Relations = hash;
-            else Relations = relations.ToHashSet();
+            Relations = relations;
             Articles = articles;
             Theorems = theorems;
             Models = models;
@@ -759,7 +793,7 @@ namespace CCView.CardinalData.Compute
         public CC CardinalFromSentence(Sentence sentence, int ind)
         {
             if (ind > 2 || ind == 0) throw new ArgumentException("ind must be 1 or 2.");
-            return Cardinals[sentence.Ids[ind]];
+            return Cardinals[sentence.Ids[ind - 1]];
         }
         // Cardinal from relation
         private CC CFR(Relation relation, int ind)
@@ -774,15 +808,15 @@ namespace CCView.CardinalData.Compute
                 Program.LoadLog("Computing in-betweenness relation for cardinal characteristics.");
                 Program.LoadLog("First computing transitive closure.");
                 int n = LogicTransClose();
-                foreach (Relation r1 in Relations)
+                foreach (Relation r1 in Relations.Values)
                 {
                     if (r1.Type == '>')
                     {
-                        foreach (Relation r2 in Relations)
+                        foreach (Relation r2 in Relations.Values)
                         {
                             if (r2.Type == '>')
                             {
-                                if (r1.Statement.GetItem2().Equals(r2.Statement.GetItem1()))
+                                if (r1.Item2Id.Equals(r2.Item1Id))
                                 {
                                     if (Density.TryGetValue((CFR(r1, 1), CFR(r2, 2)), out HashSet<CC>? between))
                                     {
@@ -804,26 +838,28 @@ namespace CCView.CardinalData.Compute
             }
             return false;
         }
-        public int CreateTrivialRelations()
+        public int CreateTrivialRelations(bool overRideCheck = false)
         {
-            if (TrivialRelationsCreated) return 0;
+            int newId = RelationDatabase.NewDictId(Relations);
+            if (TrivialRelationsCreated && !overRideCheck) return 0;
             int numberOfRelations = Relations.Count;
             foreach (AtomicRelation a in AtomicRelations)
             {
-                Relation newRel = new(a);
-                if (!Relations.Any(r => r.Equals(newRel)))
+                Relation newRel = new(a, newId);
+                if (!Relations.Any(r => r.Value.Equals(newRel)))
                 {
-                    Relations.Add(newRel);
+                    Relations[newId] = newRel;
                 }
             }
             TrivialRelationsCreated = true;
             return Relations.Count - numberOfRelations;
         }
-        public static HashSet<Relation> ComputeDeductiveClosure(IEnumerable<Relation> relations)
+        public static HashSet<Relation> ComputeDeductiveClosure(Dictionary<int, Relation> relations)
         {
-            HashSet<Relation> newRelations = [.. relations]; // This is short for new HashSet<Relation>(relation);
+            HashSet<Relation> newRelations = [];
+            HashSet<Relation> iterRelations = relations.Values.ToHashSet(); // This is short for new HashSet<Relation>(relation);
             Dictionary<Sentence, int> ageDict = [];
-            foreach (Relation r in relations)
+            foreach (Relation r in relations.Values)
             {
                 if (ageDict.TryGetValue(r.Statement, out int age))
                 {
@@ -839,9 +875,9 @@ namespace CCView.CardinalData.Compute
             {
                 changed = false;
                 HashSet<Relation> newRelationsToAdd = [];
-                foreach (var r1 in newRelations)
+                foreach (var r1 in iterRelations)
                 {
-                    foreach (var r2 in newRelations)
+                    foreach (var r2 in iterRelations)
                     {
                         Relation? dedRel = r1.Deduce(r2);
                         if (dedRel is Relation newRel)
@@ -866,6 +902,7 @@ namespace CCView.CardinalData.Compute
                 }
                 foreach (var r in newRelationsToAdd)
                 {
+                    iterRelations.Add(r);
                     newRelations.Add(r);
                 }
             } while (changed);
@@ -873,11 +910,15 @@ namespace CCView.CardinalData.Compute
         }
         public int LogicTransClose()
         {
-            int n = Relations.Count;
-            Relations = ComputeDeductiveClosure(Relations);
-            int m = Relations.Count;
-            Program.LoadLog($"Constructed {m - n} new relations in deductive closure.");
-            return m - n;
+            HashSet<Relation> newRelations = ComputeDeductiveClosure(Relations);
+            int n = newRelations.Count;
+            foreach (Relation r in newRelations)
+            {
+                r.Id = NewDictId(Relations);
+                Relations[r.Id] = r;
+            }
+            Program.LoadLog($"Constructed {n} new relations in deductive closure.");
+            return n;
         }
         public Relation AddCtoCRelation(CC? a, CC? b, char type, Theorem? witness)
         {
@@ -888,8 +929,8 @@ namespace CCView.CardinalData.Compute
             {
                 Sentence statement = new(type, [a.Id, b.Id]);
                 AtomicRelation atom = new(statement, witness);
-                Relation newRelation = new(atom);
-                Relations.Add(newRelation);
+                Relation newRelation = new(atom, NewDictId(Relations));
+                Relations[newRelation.Id] = newRelation;
                 return newRelation;
             }
         }
@@ -903,8 +944,8 @@ namespace CCView.CardinalData.Compute
             {
                 Sentence statement = new(type, [m.Id, c.Id, n]);
                 AtomicRelation atom = new(statement, witness);
-                Relation newRelation = new(atom);
-                Relations.Add(newRelation);
+                Relation newRelation = new(atom, NewDictId(Relations));
+                Relations[newRelation.Id] = newRelation;
                 return newRelation;
             }
         }
@@ -967,9 +1008,51 @@ namespace CCView.CardinalData.Compute
         {
             AddCardinal(name, symbol, NewDictId<CC>(Cardinals, fast));
         }
+        public void AddTheorem(Article article, string description, HashSet<Sentence> results, int id)
+        {
+            if (Theorems.ContainsKey(id))
+            {
+                throw new ArgumentException($"ID {id} is in use by {GetTheoremById(id)}.");
+            }
+            Theorem newTheorem = new(id, article, results, description);
+            Theorems[id] = newTheorem;
+            Console.WriteLine($"Added new theorem: {newTheorem}");
+        }
+        public void AddTheorem(Article article, string description, HashSet<Sentence> results)
+        {
+            int newId = RelationDatabase.NewDictId(Theorems);
+            AddTheorem(article, description, results, newId);
+        }
+        public static bool AddResultToTheorem(Theorem theorem, char type, int[] ids)
+        {
+            Sentence newResult = new(type, ids.ToList());
+            if (theorem.Results.Contains(newResult))
+            {
+                Console.WriteLine($"Result {newResult} already exists in {theorem}");
+                return false;
+            }
+            theorem.Results.Add(newResult);
+            Console.WriteLine($"Added new result {newResult} to {theorem}");
+            return true;
+        }
+        public void AddModel(Article article, string description, int id)
+        {
+            if (Models.ContainsKey(id))
+            {
+                throw new ArgumentException($"ID {id} is in use by {GetModelById(id)}.");
+            }
+            Model newModel = new(id, article, description, []);
+            Models[id] = newModel;
+            Console.WriteLine($"Added new model: {newModel}");
+        }
+        public void AddModel(Article article, string description)
+        {
+            int newId = RelationDatabase.NewDictId(Models);
+            AddModel(article, description, newId);
+        }
         public HashSet<Relation> GetMinimalRelations(Dictionary<int, CC> desiredCardinals)
         {
-            return DynamicDensity // : ? is a ternary relation. P : A ? B means "IF P THEN A ELSE B".
+            return DynamicDensity
                 ? GraphAlgorithm.DensityTransitiveReduction(desiredCardinals, Relations, Density)
                 : GraphAlgorithm.TransitiveReduction(desiredCardinals, Relations);
         }

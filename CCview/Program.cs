@@ -8,17 +8,20 @@
 
 // Dependencies
 // These need to be cleaned up at some point
-using System.CommandLine;
 using CCView.CardinalData;
 using CCView.CardinalData.Compute;
-using CC = CCView.CardinalData.CardinalCharacteristic;
 using CCView.JsonHandler;
-using System.Collections;
 using System;
+using System.Collections;
+using System.CommandLine;
 using System.Net.Http;
-using System.Threading.Tasks;
+using System.Reflection;
+using System.Reflection.Metadata.Ecma335;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Threading.Tasks;
+using CC = CCView.CardinalData.CardinalCharacteristic;
 
 namespace CCView
 {
@@ -128,6 +131,12 @@ namespace CCView
                 DefaultValueFactory = p => int.MaxValue
             };
 
+            Option<bool> symbolicOption = new("--symbolic")
+            {
+                Description = "Invoke to have more a more symbolic description (using 'add(M)' instead of id numbers, for example)",
+                DefaultValueFactory = p => false
+            };
+
             // Arguments //
             Argument<string> nameArgument = new("name")
             {
@@ -143,6 +152,11 @@ namespace CCView
             Argument<int> idArgument = new("id")
             {
                 Description = "Id of an object."
+            };
+
+            Argument<int> idArgumentTwo = new("id")
+            {
+                Description = "Id of a second object"
             };
 
             Argument<string> symbolArgument = new("symbol")
@@ -163,6 +177,24 @@ namespace CCView
             Argument<int> witnessIdArgument = new("Witness ID")
             {
                 Description = "ID for the theorem that witnesses the given result."
+            };
+
+            Argument<int> articleIdArgument = new("Article ID")
+            {
+                Description = "id of an article.",
+                DefaultValueFactory = p => -1
+            };
+
+            Argument<string> descriptionArgument = new("Description")
+            {
+                Description = "Description of the new object. Underscores will be interpreted as spaces.",
+                DefaultValueFactory = p => "No description provided"
+            };
+
+            Argument<string> typeArgument = new("Type")
+            {
+                Description = "Type of the relation",
+                DefaultValueFactory = p => "X"
             };
 
             // Commands //
@@ -239,20 +271,66 @@ namespace CCView
                 Console.WriteLine("Added test article.");
             });
 
-            // Add theorem (to do)
-            Command createTheorem = new("theorem", "Not implemented. Create a new theorem in an article.")
+            // Add a result to a theorem
+            Command createResultInTheorem = new("resultToTheorem", "Add a result to a theorem")
             {
-            //    articleIdArgument,
-            //    descriptionArgument,
-            //    resultsArgument,
+                idArgument,
+                typeArgument,
+                idsArgument
+            };
+            createCommand.Subcommands.Add(createResultInTheorem);
+
+            createResultInTheorem.SetAction(pR =>
+            {
+                int theoremId = pR.GetValue(idOption);
+                string typeString = pR.GetValue(typeArgument) ?? "X";
+                char type = typeString[0];
+                int[] ids = pR.GetValue(idsArgument) ?? [];
+                Theorem theorem = env.RelData.GetTheoremById(theoremId) ?? throw new ArgumentException($"ID {theoremId} is not a valid theorem id");
+                env.AddResultToTheorem(theorem, type, ids);
+            });
+
+            // Add theorem
+            Command createTheorem = new("theorem", "Create a new theorem in an article, with options to add related relatinons.")
+            {
+                articleIdArgument,
+                descriptionArgument,
                 idOption
             };
             createCommand.Subcommands.Add(createTheorem);
-            createTheorem.SetAction(pR =>
+            createTheorem.Aliases.Add("thm");
+
+            createTheorem.SetAction(async pR =>
             {
-                int Id = pR.GetValue(idOption);
-                throw new NotImplementedException();
-                return 0; // This is just here so that SetAction doesn't complain about ambiguity
+                int id = pR.GetValue(idOption);
+                int articleId = pR.GetValue(articleIdArgument);
+                string description = pR.GetValue(descriptionArgument) ?? "No description provided";
+                description = description.Replace('_', ' ');
+                Article article = env.RelData.GetArticleById(articleId) ?? throw new ArgumentException($"{articleId} is not a valid article id");
+                if (id == -1)
+                {
+                    env.AddTheorem(article, description);
+                }
+                else
+                {
+                    env.AddTheorem(article, description, id);
+                }
+                // Maybe wrap all these queries into a static function in InteractiveShell?
+                Console.Write("Would you like to add results to this theorem? [Y]es / [N]o (Default Yes): ");
+                string response = Console.ReadLine() ?? "Y";
+                if (response.Equals("yes", StringComparison.OrdinalIgnoreCase) || response.Equals("y", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine("Populating theorem. Type [type] [ids] and enter for each new theorem. Type 'exit' to stop.");
+                    await InteractiveShell.RepeatCommand(createResultInTheorem, [articleId.ToString()], "exit");
+                    Console.Write("Would you like to instantiate these new results as AtomicRelations and Relations? [Y]es / [N]o (Default: Yes): ");
+                    string atomResponse = Console.ReadLine() ?? "Y";
+                    // Flipping the order just for nesting readability
+                    if (!atomResponse.Equals("yes", StringComparison.OrdinalIgnoreCase) && !atomResponse.Equals("y", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return;
+                    }
+                    env.RegenerateAtoms();
+                }
             });
 
             // Add placeholder theorem
@@ -266,19 +344,29 @@ namespace CCView
                 env.Theorems[newId] = newTheorem;
             });
 
-            // Add model (to do)
-            Command createModel = new("model", "Not implemented. Create a new model in an article.")
+            // Add model
+            Command createModel = new("model", "Create a new model in an article, with further options to add related relations.")
             {
-            //    articleIdArgument,
-            //    descriptionArgument,
+                articleIdArgument,
+                descriptionArgument,
                 idOption
             };
             createCommand.Subcommands.Add(createModel);
             createModel.SetAction(pR =>
             {
-                int Id = pR.GetValue(idOption);
-                throw new NotImplementedException();
-                return 0; // This is just here so that SetAction doesn't complain about ambiguity
+                int articleId = pR.GetValue(articleIdArgument);
+                string description = pR.GetValue(descriptionArgument) ?? "No description provided";
+                description = description.Replace('_', ' ');
+                int id = pR.GetValue(idOption);
+                Article article = env.RelData.GetArticleById(articleId) ?? throw new ArgumentException($"{articleId} is not a valid article id");
+                if (id == -1)
+                {
+                    env.AddModel(article, description);
+                }
+                else
+                {
+                    env.AddModel(article, description, id);
+                }
             });
 
             // Add relation
@@ -384,14 +472,27 @@ namespace CCView
                 }
             });
 
-            Command listRels = new("relations", "List of relations between cardinal characteristics.");
+            Command listRels = new("relations", "List of relations between cardinal characteristics.")
+            {
+                symbolicOption
+            };
             listCommand.Subcommands.Add(listRels);
 
             listRels.SetAction(pR =>
             {
-                foreach (Relation r in env.RelData.Relations)
+                if (pR.GetValue(symbolicOption))
                 {
-                    Console.WriteLine(r);
+                    foreach (Relation r in env.RelData.Relations.Values)
+                    {
+                        Console.WriteLine(r.ToStringBySymbol(env.RelData));
+                    }
+                }
+                else
+                {
+                    foreach (Relation r in env.RelData.Relations.Values)
+                    {
+                        Console.WriteLine(r);
+                    }
                 }
             });
 
@@ -415,6 +516,19 @@ namespace CCView
                 {
                     Console.WriteLine(t);
                 }
+            });
+
+            Command listBetween = new("between", "List all cardinals lying between two given ids.")
+            {
+                idArgument,
+                idArgumentTwo
+            };
+            listCommand.Subcommands.Add(listBetween);
+            listBetween.Aliases.Add("btwn");
+
+            listBetween.SetAction(pR =>
+            {
+                env.ListBetween(pR.GetValue(idArgument), pR.GetValue(idArgumentTwo));
             });
 
             // Import article from ZBMath
@@ -466,7 +580,7 @@ namespace CCView
                 if (!pR.GetValue(fromShellOption))
                 {
                     Program.LoadLog("Creating Interactive Shell.");
-                    var shell = new InteractiveShell(env, rootCommand);
+                    InteractiveShell shell = new(env, rootCommand);
                     Program.LoadLog("Interactive Shell created.");
                     if (pR.GetValue(densityOption)) env.PopulateDensity();
                     Program.LoadLog("Loading complete.");
@@ -474,7 +588,6 @@ namespace CCView
                 }
                 else if (pR.GetValue(densityOption)) env.PopulateDensity();
             });
-
             return await rootCommand.Parse(args).InvokeAsync();
         }
 
@@ -526,7 +639,7 @@ namespace CCView
         public Dictionary<int, Article> Articles => RelData.Articles;
         public Dictionary<int, Theorem> Theorems => RelData.Theorems;
         public Dictionary<int, Model> Models => RelData.Models;
-        public HashSet<Relation> Relations => RelData.Relations;
+        public Dictionary<int, Relation> Relations => RelData.Relations;
 
 
         public RelationEnvironment(string ccFile, string relsFile, string dotFile, string graphFile, string artsFile, string thmsFile, string modsFile)
@@ -577,6 +690,16 @@ namespace CCView
         public RelationEnvironment() : this("cardinal_characteristics", "relations", "relations", "graph", "articles", "theorems", "models")
         {
         }
+        public void RegenerateAtoms()
+        {
+            Program.LoadLog("Repopulating atomic relations.");
+            int atomsCreated = RelData.GenerateAtoms();
+            Program.LoadLog($"Created {atomsCreated} new atoms.");
+            if (atomsCreated == 0) return;
+            Program.LoadLog("Generating new trivial relations.");
+            int trivialRelationsCreated = RelData.CreateTrivialRelations(true);
+            Program.LoadLog($"{trivialRelationsCreated} new relations generated.\nConsider running 'trans'.");
+        }
 
         public static string AddExtension(string file, string ext, string fileDescription)
             // Checks if a file name has an appropriate extension. Warns if not.
@@ -603,15 +726,15 @@ namespace CCView
         public void Save()
         {
             Unsaved = false;
-            JsonFileHandler.Save(CCPath, Cardinals.Values);
+            JsonFileHandler.Save(CCPath, Cardinals);
             Program.LoadLog($"Cardinals saved to {CCPath}.");
-            JsonFileHandler.Save(RelsPath, RelData.Relations.ToList());
+            JsonFileHandler.Save(RelsPath, Relations);
             Program.LoadLog($"RelData saved to {RelsPath}.");
-            JsonFileHandler.Save(ArtsPath, Articles.Values);
+            JsonFileHandler.Save(ArtsPath, Articles);
             Program.LoadLog($"Articles saved to {ArtsPath}.");
-            JsonFileHandler.Save(ThmsPath, Theorems.Values);
+            JsonFileHandler.Save(ThmsPath, Theorems);
             Program.LoadLog($"Theorems saved to {ThmsPath}.");
-            JsonFileHandler.Save(ModsPath, Models.Values);
+            JsonFileHandler.Save(ModsPath, Models);
             Program.LoadLog($"Models saved to {ModsPath}.");
         }
 
@@ -638,6 +761,33 @@ namespace CCView
         public void AddArticle(string name, int date, string citation)
         {
             RelData.AddArticle(name, date, citation);
+            Unsaved = true;
+        }
+        public void AddTheorem(Article article, string description, int id)
+        {
+            RelData.AddTheorem(article, description, [], id);
+            Unsaved = true;
+        }
+        public void AddTheorem(Article article, string description)
+        {
+            RelData.AddTheorem(article, description, []);
+            Unsaved = true;
+        }
+        public void AddResultToTheorem(Theorem theorem, char type, int[] ids)
+        {
+            if (RelationDatabase.AddResultToTheorem(theorem, type, ids))
+            {
+                Unsaved = true;
+            }
+        }
+        public void AddModel(Article article, string description, int id)
+        {
+            RelData.AddModel(article, description, id);
+            Unsaved = true;
+        }
+        public void AddModel(Article article, string description)
+        {
+            RelData.AddModel(article, description);
             Unsaved = true;
         }
         public async Task ImportArticle(int zb)
@@ -682,6 +832,42 @@ namespace CCView
         {
             if (RelData.PopulateDensity()) Unsaved = true;
         }
+        public void ListBetween(int id1, int id2)
+        {
+            if (!RelData.DynamicDensity)
+            {
+                Console.WriteLine("In betweenness relation not yet calculated. Try running --btwn first.");
+                return;
+            }
+            CC cardinal1 = RelData.GetCardinalById(id1)!;
+            CC cardinal2 = RelData.GetCardinalById(id2)!;
+            if (cardinal1 == null || cardinal2 == null)
+            {
+                throw new ArgumentException("One of the input ids returns a null cardinal");
+            }
+            if (!RelData.Density.TryGetValue((cardinal1, cardinal2), out HashSet<CC>? density))
+            {
+                Console.WriteLine($"There are no cardinals between {cardinal1} and {cardinal2}");
+                return;
+            }
+            if (density.Count == 0)
+            {
+                Console.WriteLine($"There are no cardinals between {cardinal1} and {cardinal2}");
+                return;
+            }
+            if (density.Count == 1)
+            {
+                Console.WriteLine($"There is 1 cardinal between {cardinal1} and {cardinal2}");
+            }
+            else
+            {
+                Console.WriteLine($"There are {density.Count} cardinals between {cardinal1} and {cardinal2}");
+            }
+            foreach (CC cardinal in density)
+            {
+                Console.WriteLine(cardinal);
+            }
+        }
     }
     public class InteractiveShell
     {
@@ -689,7 +875,7 @@ namespace CCView
         private readonly RelationEnvironment env;
         private readonly RootCommand rootCommand;
         private static readonly HttpClient Client = new();
-        private static readonly JsonSerializerOptions Options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true }; 
+        private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true }; 
         public InteractiveShell(RelationEnvironment env, RootCommand rootCommand)
         {
             this.env = env;
@@ -740,6 +926,23 @@ namespace CCView
             catch (HttpRequestException e)
             {
                 throw new ArgumentException($"Error fetching page: {e.Message}");
+            }
+        }
+        public static async Task RepeatCommand(Command command, string[] prependArgs, string exitCode)
+        {
+            bool shouldLeaveRepeatCommand = false;
+            while (!shouldLeaveRepeatCommand)
+            {
+                Console.Write(">> ");
+                string input = Console.ReadLine() ?? "";
+                if (string.IsNullOrWhiteSpace(input)) continue;
+                if (input == exitCode)
+                {
+                    break;
+                }
+                string[] args = input.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                args = [.. prependArgs, .. args];
+                await command.Parse(args).InvokeAsync();
             }
         }
     }
