@@ -4,17 +4,10 @@
 // A basic collection of articles, models and cardinals to test with
 // Better command line interface for plotting
 // Commands to add custom articles, theorems and models
-// Completely overhaul the Relation logic to work as being built off of AtomicRelations
-// Use this to implement 'best (oldest) proof' style logic
-// Clean up some of the excess variables lying around. I think that LoadedCardinals doesn't need to exist, for example
-// Oh and make sure that we sort the List<T> things by item => item.Id, making sure to fill in blank spaces with nulls
-// Or just turn it into a dictionary?
-// OR just be more happy to FetchById
-// Make JsonFileHandler.Load automatically create a dictionary and handle relations separately
+// Implement 'best (oldest) proof' style logic (done?)
 
 // Dependencies
 // These need to be cleaned up at some point
-
 using System.CommandLine;
 using CCView.CardinalData;
 using CCView.CardinalData.Compute;
@@ -35,9 +28,6 @@ namespace CCView
         public static bool ShouldExit { get; private set; } = false;
         static async Task<int> Main(string[] args)
         {
-            //Console.WriteLine("Hi Callie! This is your reminder that we want to implement 'atomic' versus 'non-atomic' relations now. So make sure they can save/load properly and that the derivations work as intended. Throw in some checks to make sure that a derivation doesn't contain multiple of the same atomic relation, since that would allow infinite descending derivations of known theorems. Maybe also implement a GetAge() function.");
-            //Console.WriteLine("Also get rid of ArtId in Relation.");
-
             // For now we assume that we are only ever working with one set of files: cardinal_characteristics.json and relations.json
             var Env = new RelationEnvironment();
             return await Run(Env, args);
@@ -170,6 +160,11 @@ namespace CCView
                 Description = "Article number by the ZBMath organisational system (see zbmath.org). Do not include 'Zbl'."
             };
 
+            Argument<int> witnessIdArgument = new("Witness ID")
+            {
+                Description = "ID for the theorem that witnesses the given result."
+            };
+
             // Commands //
 
             rootCommand.Options.Add(densityOption);
@@ -178,6 +173,7 @@ namespace CCView
             // Add cardinal
             Command createCommand = new("create", "Create a new specified object.");
             createCommand.Aliases.Add("add");
+            rootCommand.Subcommands.Add(createCommand);
 
             Command createCC = new("cardinal", "Create a new cardinal characteristic.")
             {
@@ -233,9 +229,63 @@ namespace CCView
                 }
             });
 
-            // Add relation
-            Command createRelation = new("relation", "Add a relation between two cardinals.")
+            // Add empty article
+            Command createBlankArticle = new("barticle", "Add an empty article");
+            createCommand.Subcommands.Add(createBlankArticle);
+
+            createBlankArticle.SetAction(pR =>
             {
+                env.AddArticle("Test", 99999999, "Test");
+                Console.WriteLine("Added test article.");
+            });
+
+            // Add theorem (to do)
+            Command createTheorem = new("theorem", "Not implemented. Create a new theorem in an article.")
+            {
+            //    articleIdArgument,
+            //    descriptionArgument,
+            //    resultsArgument,
+                idOption
+            };
+            createCommand.Subcommands.Add(createTheorem);
+            createTheorem.SetAction(pR =>
+            {
+                int Id = pR.GetValue(idOption);
+                throw new NotImplementedException();
+                return 0; // This is just here so that SetAction doesn't complain about ambiguity
+            });
+
+            // Add placeholder theorem
+            Command createPlaceholderTheorem = new("ptheorem", "Add a placeholder theorem");
+            createCommand.Subcommands.Add(createPlaceholderTheorem);
+
+            createPlaceholderTheorem.SetAction(pR =>
+            {
+                int newId = RelationDatabase.NewDictId(env.Theorems);
+                Theorem newTheorem = new(0, new(), [new('>', [1, 0]), new('>', [0, 9])], "Test");
+                env.Theorems[newId] = newTheorem;
+            });
+
+            // Add model (to do)
+            Command createModel = new("model", "Not implemented. Create a new model in an article.")
+            {
+            //    articleIdArgument,
+            //    descriptionArgument,
+                idOption
+            };
+            createCommand.Subcommands.Add(createModel);
+            createModel.SetAction(pR =>
+            {
+                int Id = pR.GetValue(idOption);
+                throw new NotImplementedException();
+                return 0; // This is just here so that SetAction doesn't complain about ambiguity
+            });
+
+            // Add relation
+            // Massively needs overhauling
+            Command createRelation = new("relation", "Legacy functionality. Add a relation between two cardinals.")
+            {
+                witnessIdArgument,
                 idsArgument,
                 typeOption
             };
@@ -246,7 +296,8 @@ namespace CCView
                 int[] ids = pR.GetValue(idsArgument)!; // ! here is the null-forgiving operator, which is okay because we know that it is never null
                 string typeString = pR.GetValue(typeOption) ?? "X";
                 char type = typeString[0];
-                env.RelateCardinals(ids[0], ids[1], type);
+                int witnessId = pR.GetValue(witnessIdArgument);
+                env.RelateCardinals(ids[0], ids[1], type, witnessId);
                 if (Program._loadLog)
                 {
                     var c1 = env.RelData.GetCardinalById(ids[0]);
@@ -256,8 +307,9 @@ namespace CCView
             });
 
             // Add relation by symbol string
-            Command relateSymbolCommand = new("relationbysymbol", "Add a relation between two cardinals by their symbols.")
+            Command relateSymbolCommand = new("relationbysymbol", "Legacy functionality. Add a relation between two cardinals by their symbols.")
             {
+                witnessIdArgument,
                 symbolsArgument,
                 typeOption
             };
@@ -272,30 +324,9 @@ namespace CCView
                 char type = typeString[0];
                 CC Item1 = env.RelData.GetCardinalBySymbol(symbols[0]);
                 CC Item2 = env.RelData.GetCardinalBySymbol(symbols[1]);
-                env.RelateCardinals(Item1.Id, Item2.Id, type);
+                int witnessId = pR.GetValue(witnessIdArgument);
+                env.RelateCardinals(Item1.Id, Item2.Id, type, witnessId);
                 Program.LoadLog($"Cardinals {Item1} and {Item2} related with type '{type}' relation.");
-            });
-
-            // Add empty article
-            Command createBlankArticle = new("barticle", "Add an empty article");
-            createCommand.Subcommands.Add(createBlankArticle);
-
-            createBlankArticle.SetAction(pR =>
-            {
-                env.AddArticle("Test", 99999999, "Test");
-                Console.WriteLine("Added test article.");
-            });
-
-            // Add placeholder theorem
-            Command createPlaceholderTheorem = new("ptheorem", "Add a placeholder theorem");
-            createCommand.Subcommands.Add(createPlaceholderTheorem);
-
-            createPlaceholderTheorem.SetAction(pR =>
-            {
-                int newId = RelationDatabase.NewDictId(env.Theorems);
-                Theorem newTheorem = new(newId, env.Articles[0], [(env.RelData.GetCardinalBySymbol("D"), env.RelData.GetCardinalBySymbol("Item2Id"), '>'),
-                    (env.RelData.GetCardinalBySymbol("Item2Id"), env.RelData.GetCardinalBySymbol("add(M)"), '>')], "Test");
-                env.Theorems[newId] = newTheorem;
             });
 
             // Compute transitive closure
@@ -340,8 +371,9 @@ namespace CCView
 
             // List objects
             Command listCommand = new("list", "List all objects of a particular type");
+            rootCommand.Subcommands.Add(listCommand);
 
-            Command listCC = new("list", "List all cardinal characteristics.");
+            Command listCC = new("cardinals", "List all cardinal characteristics.");
             listCommand.Subcommands.Add(listCC);
 
             listCC.SetAction(pR =>
@@ -368,9 +400,20 @@ namespace CCView
 
             listArts.SetAction(pR =>
             {
-                foreach (Article a in env.RelData.Articles.Values)
+                foreach (Article a in env.Articles.Values)
                 {
                     Console.WriteLine(a);
+                }
+            });
+
+            Command listThms = new("theorems", "List of theorems in the database.");
+            listCommand.Subcommands.Add(listThms);
+
+            listThms.SetAction(pR =>
+            {
+                foreach (Theorem t in env.Theorems.Values)
+                {
+                    Console.WriteLine(t);
                 }
             });
 
@@ -477,7 +520,7 @@ namespace CCView
         //private Dictionary<int, Article> LoadedArticles;
         //private Dictionary<int, Theorem> LoadedTheorems;
         //private Dictionary<int, Model> LoadedModels;
-        public RelationDatabase RelData = new RelationDatabase();
+        public RelationDatabase RelData = new();
         public bool Unsaved { get; private set; } = false;
         public Dictionary<int, CC> Cardinals => RelData.Cardinals;
         public Dictionary<int, Article> Articles => RelData.Articles;
@@ -515,17 +558,19 @@ namespace CCView
             Program.LoadLog("Loading articles.");
             var LoadedArticles = JsonFileHandler.Load<Article>(ArtsPath);
             Program.LoadLog("Loading theorems.");
-            // LoadedCardinals.Values.ToList() is a bad solution for the moment
             var LoadedTheorems = JsonFileHandler.LoadTheorems(ThmsPath, LoadedCardinals, LoadedArticles);
             Program.LoadLog("Loading models.");
             var LoadedModels = JsonFileHandler.LoadModels(ModsPath, LoadedCardinals, LoadedArticles, LoadedTheorems);
             Program.LoadLog("Loading relations.");
-            var LoadedRelations = JsonFileHandler.LoadRelations(RelsPath, LoadedCardinals, LoadedTheorems, LoadedModels);
+            var LoadedRelations = JsonFileHandler.LoadRelations(RelsPath, LoadedTheorems);
             Program.LoadLog("Creating Relation Database environment.");
             RelData = new RelationDatabase(LoadedCardinals, LoadedRelations, LoadedArticles, LoadedTheorems, LoadedModels);
             Program.LoadLog("Populating atomic relations.");
-            RelData.GenerateAtoms();
-            RelData.CreateTrivialRelations();
+            int atomsCreated = RelData.GenerateAtoms();
+            Program.LoadLog($"Created {atomsCreated} atoms.");
+            Program.LoadLog("Generating trivial relations.");
+            int trivialRelationsCreated = RelData.CreateTrivialRelations();
+            Program.LoadLog($"{trivialRelationsCreated} new relations generated.");
             Program.LoadLog("Relation Environment complete.");
         }
 
@@ -580,9 +625,9 @@ namespace CCView
             RelData.AddCardinal(name, symbol);
             Unsaved = true;
         }
-        public void RelateCardinals(int idOne, int idTwo, char type)
+        public void RelateCardinals(int idOne, int idTwo, char type, int witnessId)
         {
-            RelData.AddRelationByIds(idOne, idTwo, type);
+            RelData.AddCtoCRelationByIds(idOne, idTwo, type, witnessId);
             Unsaved = true;
         }
         public void AddArticle(string name, int date, string citation, int id)
@@ -607,14 +652,16 @@ namespace CCView
         }
         public void TransClose()
         {
-            int numNewRels = RelData.TransClose();
+            int numNewRels = RelData.LogicTransClose();
             if (numNewRels > 0) Unsaved = true;
         }
 
         public string PlotGraphDot(int[] ids, string fileName)
         {
-            List<CC> cardinals = [.. ids.Select(id => RelData.Cardinals[id])];
-            var dot = GraphLogic.Vis.GraphDrawer.GenerateGraph(cardinals, RelData.GetMinimalRelations(cardinals));
+            Dictionary<int, CC> cardinals = RelData.Cardinals
+                .Where(kvp => ids.Contains(kvp.Key))
+                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+            var dot = GraphLogic.Vis.GraphDrawer.GenerateGraph(cardinals, RelData.GetMinimalRelations(cardinals), RelData);
             GraphLogic.Vis.GraphDrawer.WriteDotFile(dot, Path.Combine(OutDirectory, fileName));
             return dot;
         }

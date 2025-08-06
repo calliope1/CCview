@@ -10,33 +10,63 @@ namespace CCView.GraphLogic
 {
     public class GraphHandler
     {
-        public static (HashSet<Relation>, IEnumerable<CC>) CleanRelations(List<CC> cardinals, HashSet<Relation> relations)
+        // Return a minimal collection of relations (of Type type) that involve only those CCs in cardinals
+        public static HashSet<Relation> OldestCtoCMinimalSample(IEnumerable<CC> cardinals, IEnumerable<Relation> relations, char type)
         {
-            var cleanRelations = new HashSet<Relation>();
-
-            foreach (Relation rel in relations)
+            IEnumerable<int> validIds = cardinals.Select(c => c.Id);
+            if (!Sentence.CtoCTypes.Contains(type)) throw new ArgumentException($"Type {type} is not valid for CtoC operations.");
+            Dictionary<(int, int), Relation> agedRels = [];
+            foreach (Relation r in relations)
             {
-                if (rel.Item1 == null || rel.Item2 == null)
-                {
-                    throw new ArgumentException("Relation contains null cardinal characteristic.");
-                }
-                else if (rel.Type != '>')
+                if (r.Type != type
+                    || !validIds.Contains(r.Statement.GetItem1())
+                    || !validIds.Contains(r.Statement.GetItem2()))
                 {
                     continue;
                 }
-                else cleanRelations.Add(rel);
+                if (agedRels.TryGetValue((r.Statement.GetItem1(), r.Statement.GetItem2()), out Relation? other))
+                {
+                    if (r.Age < other.Age || other == null)
+                    {
+                        agedRels[(r.Statement.GetItem1(), r.Statement.GetItem2())] = r;
+                    }
+                }
+                else
+                {
+                    agedRels[(r.Statement.GetItem1(), r.Statement.GetItem2())] = r;
+                }
             }
-
-            var allVertices = cleanRelations
-                .SelectMany(rel => new[] { rel.Item1, rel.Item2 })
-                .Concat(cardinals)
-                .Distinct();
-            return (cleanRelations, allVertices);
+            return agedRels.Values.ToHashSet();
         }
-        public static AdjacencyGraph<CC, RelEdge> CCRGraph(IEnumerable<CC> cardinals, IEnumerable<Relation> relations)
+        // This is not fast, but it does do the job
+        public static HashSet<HashSet<CC>> EquivalenceClasses(Dictionary<int, CC> cardinals, IEnumerable<Relation> relations)
+        {
+            Dictionary<int, HashSet<int>> teamNames = [];
+            IEnumerable<int> validIds = cardinals.Select(c => c.Key);
+            foreach (int id in validIds) teamNames[id] = [id];
+            foreach (Relation r1 in relations)
+                foreach (Relation r2 in relations)
+                {
+                    if (r1.Type == '>'
+                        && r2.Type == '>'
+                        && r1.Statement.GetItem1().Equals(r2.Statement.GetItem2())
+                        && r1.Statement.GetItem2().Equals(r2.Statement.GetItem1()))
+                    {
+                        teamNames[r1.Statement.GetItem1()].Add(r1.Statement.GetItem2());
+                        teamNames[r2.Statement.GetItem1()].Add(r2.Statement.GetItem2());
+                    }
+                }
+            HashSet<HashSet<CC>> classes = [];
+            foreach (HashSet<int> team in teamNames.Values)
+            {
+                classes.Add(team.Select(i => cardinals[i]).ToHashSet());
+            }
+            return classes;
+        }
+        public static AdjacencyGraph<CC, RelEdge> CCRGraph(IEnumerable<CC> cardinals, IEnumerable<Relation> relations, RelationDatabase rd)
         {
             AdjacencyGraph<CC, RelEdge> graph = new();
-            var newEdges = relations.Select(r => new RelEdge(r));
+            var newEdges = relations.Select(r => new RelEdge(r, rd));
             graph.AddVertexRange(cardinals);
             graph.AddEdgeRange(newEdges);
             return graph;
@@ -48,10 +78,12 @@ namespace CCView.GraphLogic.Vis
 {
     public class GraphDrawer
     {
-        public static string GenerateGraph(List<CC> cardinals, HashSet<Relation> relations)
+        public static string GenerateGraph(Dictionary<int, CC> cardinals, HashSet<Relation> relations, RelationDatabase rd)
         {
-            var (cleanRelations, allVertices) = GraphHandler.CleanRelations(cardinals, relations);
-            var graph = GraphHandler.CCRGraph(allVertices, cleanRelations);
+            HashSet<Relation> cleanRelations = GraphHandler.OldestCtoCMinimalSample(cardinals.Values, relations, '>');
+            HashSet<HashSet<CC>> cardinalClasses = GraphHandler.EquivalenceClasses(cardinals, cleanRelations);
+            HashSet<CC> allVertices = cardinalClasses.Select(eClass => eClass.First()).ToHashSet();
+            var graph = GraphHandler.CCRGraph(allVertices, cleanRelations, rd);
             var algorithm = new GraphvizAlgorithm<CC, RelEdge>(graph);
 
             algorithm.FormatVertex += (sender, args) =>
@@ -105,216 +137,52 @@ namespace CCView.GraphLogic.Algorithms
 {
     public static class GraphAlgorithm
     {
-        public static HashSet<Relation> TransitiveReduction(List<CC> desiredCardinals, IEnumerable<Relation> relations)
+        public static HashSet<Relation> TransitiveReduction(Dictionary<int, CC> desiredCardinals, IEnumerable<Relation> relations)
         {
-            var testRelation = new Relation(new CC(), new CC(), '>');
-            var minimalRelations = new HashSet<Relation>();
-            var minimalCardinals = new HashSet<CC>();
+            Sentence testSentence = new('>', [-1, -1]);
+            HashSet<Relation> minimalRelations = [];
+            HashSet<HashSet<CC>> equivalenceClasses = GraphHandler.EquivalenceClasses(desiredCardinals, relations);
+            HashSet<CC> minimalCardinals = equivalenceClasses.Select(eClass => eClass.First()).ToHashSet();
+            HashSet<int> minimalIds = minimalCardinals.Select(c => c.Id).ToHashSet();
+            HashSet<Sentence> sentences = relations.Select(r => r.Statement).ToHashSet();
 
-            // Eliminate equivalence classes
-            // To do: Include this in return
-            foreach (var c in desiredCardinals)
+            foreach (var rel in relations)
             {
+                if (rel.Type != '>'
+                    || rel.Statement.GetItem1().Equals(rel.Statement.GetItem2())
+                    || !minimalIds.Contains(rel.Statement.GetItem1())
+                    || !minimalIds.Contains(rel.Statement.GetItem2())) continue;
                 bool toAdd = true;
-                foreach (var d in minimalCardinals)
+                foreach (int id in minimalIds)
                 {
-                    testRelation.Item1 = c;
-                    testRelation.Item2 = d;
-                    if (relations.Contains(testRelation))
+                    if (id.Equals(rel.Statement.GetItem1()) || id.Equals(rel.Statement.GetItem2())) continue;
+                    testSentence.Ids = [rel.Statement.GetItem1(), id];
+                    if (sentences.Contains(testSentence))
                     {
-                        testRelation.Item1 = d;
-                        testRelation.Item2 = c;
-                        if (relations.Contains(testRelation))
+                        testSentence.Ids = [id, rel.Statement.GetItem2()];
+                        if (sentences.Contains(testSentence))
                         {
                             toAdd = false;
                             break;
                         }
                     }
                 }
-                if (toAdd) minimalCardinals.Add(c);
-            }
-
-            foreach (var rel in relations)
-            {
-                if (rel.Item1.Equals(rel.Item2) || !desiredCardinals.Contains(rel.Item1) || !desiredCardinals.Contains(rel.Item2)) continue;
-                else
-                {
-                    bool toAdd = true;
-                    foreach (var c in desiredCardinals)
-                    {
-                        if (c.Equals(rel.Item1) || c.Equals(rel.Item2))
-                        {
-                            continue; // Skip self-comparisons
-                        }
-                        testRelation.Item1 = rel.Item1;
-                        testRelation.Item2 = c;
-                        if (relations.Contains(testRelation))
-                        {
-                            testRelation.Item1 = c;
-                            testRelation.Item2 = rel.Item2;
-                            if (relations.Contains(testRelation))
-                            {
-                                toAdd = false;
-                                break;
-                            }
-                        }
-                    }
-                    if (toAdd)
-                    {
-                        minimalRelations.Add(rel);
-                    }
-                }
+                if (toAdd) minimalRelations.Add(rel);
             }
             return minimalRelations;
         }
-        public static HashSet<Relation> DensityTransitiveReduction(IEnumerable<CC> cardinals, IEnumerable<Relation> relations, Dictionary<(CC, CC), HashSet<CC>> density)
+        public static HashSet<Relation> DensityTransitiveReduction(Dictionary<int, CC> cardinals, IEnumerable<Relation> relations, Dictionary<(CC, CC), HashSet<CC>> density)
         {
             HashSet<Relation> minimalRelations = [];
             foreach (Relation r in relations)
             {
-                if (r.Type == '>')
-                {
-                    if (density.TryGetValue((r.Item1, r.Item2), out HashSet<CC>? inBetween)) // If density[(a, b)] is empty then it won't even be a key
-                    {
-                        if (!inBetween.Intersect(cardinals).Any())
-                        {
-                            minimalRelations.Add(r);
-                        }
-                    }
-                    else
-                    {
-                        minimalRelations.Add(r);
-                    }
-                }
+                if (r.Type != '>') continue;
+                // If density[(a, b)] is empty then it won't even be a key
+                if (density.TryGetValue((cardinals[r.Statement.GetItem1()], cardinals[r.Statement.GetItem2()]), out HashSet<CC>? inBetween)
+                    && inBetween.Intersect(cardinals.Values).Any()) continue;
+                minimalRelations.Add(r);
             }
             return minimalRelations;
         }
-        //public static HashSet<Relation> GetMinMaxMinimalRelations(List<CC> cardinals, HashSet<Relation> relations)
-        //{
-        //    HashSet<Relation> result = [];
-        //    Dictionary<int, HashSet<Relation>> AgeDict = [];
-        //    List<int> AgeList = [];
-        //    foreach (Relation r in relations)
-        //    {
-        //        if (AgeDict.TryGetValue(r.Year, out HashSet<Relation>? value))
-        //        {
-        //            value.Add(r);
-        //        }
-        //        else
-        //        {
-        //            AgeList.Add(r.Year);
-        //            AgeDict.Add(r.Year, [r]);
-        //        }
-        //    }
-        //    _ = AgeList.Order(); // This means AgeList = AgeList.Order();
-        //    List<Relation> subRelations = [];
-        //    foreach (int age in AgeList)
-        //    {
-        //        _ = subRelations.Union(AgeDict[age]);
-        //        AdjacencyGraph<CC, RelEdge> graph = GraphHandler.CCRGraph(cardinals, subRelations);
-        //        var subGraph = BuildAdjacencyList(cardinals, subRelations);
-        //        var reach = ComputeReachability(cardinals, subGraph);
-
-        //        //TransitiveReductionAlgorithm<CC, RelEdge> algorithm = new(graph);
-        //        //algorithm.Compute(); // THIS DOESN'T WORK, TRANSITIVE REDUCTION IN QUIKGRAPH IS THE UNDIRECTED VERSION
-        //        //List<Relation> reducedEdges = (List<Relation>)graph.Edges.Select(rE => rE.Relation);
-
-        //        var reducedEdges = TransitiveReduction(cardinals, subGraph, reach, subRelations);
-        //        _ = result.Union(reducedEdges.Intersect(AgeDict[age]));
-        //    }
-        //    return result;
-        //}
-        //public static Dictionary<CC, List<CC>> BuildAdjacencyList(List<CC> cardinals, List<Relation> relations)
-        //{
-        //    Dictionary<CC, List<CC>> adj = cardinals.ToDictionary(c => c, c => new List<CC>());
-        //    foreach (Relation r in relations)
-        //    {
-        //        adj[r.Item1].Add(r.Item2);
-        //    }
-        //    return adj;
-        //}
-        //public static Dictionary<CC, HashSet<CC>> ComputeReachability(List<CC> cardinals, Dictionary<CC, List<CC>> adjacency)
-        //{
-        //    Dictionary<CC, HashSet<CC>> reach = new();
-        //    foreach (CC c in cardinals)
-        //    {
-        //        HashSet<CC> visited = [];
-        //        DFS(c, adjacency, visited);
-        //        reach[c] = visited;
-        //    }
-        //    return reach;
-        //}
-        //public static void DFS(CC c, Dictionary<CC, List<CC>> adjacency, HashSet<CC> visited)
-        //{
-        //    Stack<CC> stack = new();
-        //    stack.Push(c);
-        //    while (stack.Count > 0)
-        //    {
-        //        var current = stack.Pop();
-        //        if (visited.Add(current))
-        //        {
-        //            foreach (CC neighbour in adjacency[current])
-        //            {
-        //                stack.Push(neighbour);
-        //            }
-        //        }
-        //    }
-        //}
-        //public static List<Relation> TransitiveReduction(
-        //    List<CC> cardinals,
-        //    Dictionary<CC, List<CC>> adjacency,
-        //    Dictionary<CC, HashSet<CC>> reach,
-        //    List<Relation> relations
-        //    )
-        //{
-        //    List<Relation> reduced = [];
-        //    foreach (CC c in cardinals)
-        //    {
-        //        foreach (CC d in adjacency[c])
-        //        {
-        //            bool redundant = false;
-        //            foreach (CC intermediate in adjacency[c])
-        //            {
-        //                if (!intermediate.Equals(d) && reach[intermediate].Contains(d))
-        //                {
-        //                    redundant = true;
-        //                    break;
-        //                }
-        //            }
-        //            if (!redundant)
-        //            {
-        //                reduced.Add(FindOldestRelation(c, d, relations));
-        //            }
-        //        }
-        //    }
-        //    return reduced;
-        //}
-        //public static Relation FindOldestRelation(CC c, CC d, List<Relation> relations)
-        //{
-        //    int minAge = int.MinValue;
-        //    Relation? result = null;
-        //    foreach (Relation r in relations)
-        //    {
-        //        if (r.Item1.Equals(c) && r.Item2.Equals(d) && r.Year < minAge)
-        //        {
-        //            minAge = r.Year;
-        //            result = r;
-        //        }
-        //    }
-        //    if (result != null)
-        //    {
-        //        return result;
-        //    }
-        //    else
-        //    {
-        //        throw new ArgumentException($"No relation between {c} and {d} exists in the provided list.");
-        //    }
-        //}
-
-        //public static List<Relation> OldestPath(HashSet<Relation> relations, CC c1, CC c2)
-        //{
-        //    // This is a co-Widest path algorithm, finding the combination of Relations with the least maximum Year.
-        //    throw new NotImplementedException();
-        //}
     }
 }

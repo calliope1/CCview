@@ -53,33 +53,19 @@ namespace CCView.JsonHandler
             }
             return values;
         }
-        public static HashSet<Relation> LoadRelations(string path, Dictionary<int, CC> cardinals, Dictionary<int, Theorem> theorems, Dictionary<int, Model> models)
+        public static HashSet<Relation> LoadRelations(string path, Dictionary<int, Theorem> theorems)
         {
             List<JArray> data = LoadJsonData(path);
             HashSet<Relation> relations = [];
             foreach (JArray item in data)
             {
-                Relation instance = new();
-                instance.InstantiateFromJArray(item);
-                instance.Item1 = cardinals[instance.Item1Id];
-                instance.Item2 = cardinals[instance.Item2Id];
-                instance.Type = Sentence.TypeIndices[instance.TypeId];
-                foreach (IntFive der in instance.DerIds)
+                Relation newRel = new();
+                newRel.InstantiateFromJArray(item);
+                foreach (AtomicRelation atom in newRel.Derivation)
                 {
-                    if (der.ThmFlag == 0)
-                    {
-                        instance.Derivation.Add(new(cardinals[der.Item1Id], cardinals[der.Item2Id], instance.Type, theorems[der.ThmId]));
-                    }
-                    else if (der.ThmFlag == 1)
-                    {
-                        instance.Derivation.Add(new(cardinals[der.Item1Id], cardinals[der.Item2Id], instance.Type, models[der.ThmId]));
-                    }
-                    else
-                    {
-                        throw new ArgumentException("The fourth item of a DerId must be 0 or 1.");
-                    }
+                    atom.Witness = theorems[atom.WitnessId];
                 }
-                relations.Add(instance);
+                relations.Add(newRel);
             }
             return relations;
         }
@@ -97,7 +83,6 @@ namespace CCView.JsonHandler
                     instance.Values.Add(newVal);
                 }
                 instance.Article = articles[instance.ArtId];
-                instance.GenerateResults();
                 models[instance.Id] = instance;
             }
             return models;
@@ -108,15 +93,6 @@ namespace CCView.JsonHandler
             foreach (Theorem thm in theorems.Values)
             {
                 thm.Article = articles[thm.ArtId];
-                foreach (int[] res in thm.ResIds)
-                {
-                    if (res.Length != 3)
-                    {
-                        throw new ArgumentException($"The result ids array of a theorem in {path} does not have three elements.");
-                    }
-                    Console.WriteLine("Check here that res has exactly three members.");
-                    thm.Results.Add((cardinals[res[0]], cardinals[res[1]], Sentence.TypeIndices[res[2]]));
-                }
             }
             return theorems;
         }
@@ -195,9 +171,13 @@ namespace CCView.JsonHandler
             JArray newArray = [];
             foreach (object item in enumerable)
             {
-                if (item is IntFive intFive)
+                if (item is IntThree intThree)
                 {
-                    newArray.Add(JArray.FromObject(intFive.ToList()));
+                    newArray.Add(JArray.FromObject(intThree.ToList()));
+                }
+                else if (item is JsonToArray jta)
+                {
+                    newArray.Add(jta.TurnToJson());
                 }
                 else if (item is IEnumerable subenumerable && item is not string)
                 {
@@ -245,9 +225,9 @@ namespace CCView.JsonHandler
                 {
                     jsonArray.Add(jta.TurnToJson());
                 }
-                else if (value is IntFive intFive)
+                else if (value is IntThree intThree)
                 {
-                    jsonArray.Add(JArray.FromObject(intFive.ToList()));
+                    jsonArray.Add(JArray.FromObject(intThree.ToList()));
                 }
                 else if (value is IEnumerable enumerable && value is not string)
                 {
@@ -275,72 +255,6 @@ namespace CCView.JsonHandler
     public abstract class JsonToArray
     {
         public abstract JArray TurnToJson();
-    }
-
-    public readonly struct IntFive : IEquatable<IntFive>
-    {
-        public readonly int Item1Id, Item2Id, TypeId, ThmFlag, ThmId;
-        public IntFive(int a, int b, int c, int d, int e)
-        {
-            Item1Id = a;
-            Item2Id = b;
-            TypeId = c;
-            ThmFlag = d;
-            ThmId = e;
-        }
-        public IntFive(int[] array)
-        {
-            if (array == null || array.Length != 5)
-            {
-                throw new ArgumentException("Array must be of length 5.");
-            }
-            Item1Id = array[0];
-            Item2Id = array[1];
-            TypeId = array[2];
-            ThmFlag = array[3];
-            ThmId = array[4];
-        }
-        public IntFive(List<int> list)
-        {
-            if (list == null || list.Count != 5)
-            {
-                throw new ArgumentException("List must be of length 5.");
-            }
-            Item1Id = list[0];
-            Item2Id = list[1];
-            TypeId = list[2];
-            ThmFlag = list[3];
-            ThmId = list[4];
-        }
-        public bool Equals(IntFive other)
-        {
-            return Item1Id == other.Item1Id
-                && Item2Id == other.Item2Id
-                && TypeId == other.TypeId
-                && ThmFlag == other.ThmFlag
-                && ThmId == other.ThmId;
-        }
-        public override bool Equals(object? obj)
-        {
-            return obj is IntFive other && Equals(other);
-        }
-        public override int GetHashCode()
-        {
-            return HashCode.Combine(Item1Id, Item2Id, TypeId, ThmFlag, ThmId);
-        }
-        public int[] ToArray() => [Item1Id, Item2Id, TypeId, ThmFlag, ThmId];
-        public List<int> ToList() => [Item1Id, Item2Id, TypeId, ThmFlag, ThmId];
-        public HashSet<int> ToHashSet() => [Item1Id, Item2Id, TypeId, ThmFlag, ThmId];
-        public static bool operator ==(IntFive left, IntFive right)
-        {
-            return left.Equals(right);
-        }
-        public static bool operator !=(IntFive left, IntFive right)
-        {
-            return !(left == right);
-        }
-        public static implicit operator IntFive(List<int> list) => new(list);
-        public static implicit operator IntFive(int[] array) => new(array);
     }
     public readonly struct IntThree : IEquatable<IntThree>
     {

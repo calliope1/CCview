@@ -14,10 +14,9 @@ namespace CCView.CardinalData
         //public int Id { get; private set; } = -1;
         public string Name { get; set; } = "No name assigned";
         public string SymbolString { get; set; } = "X";
-        private int ArtId { get; set; } = -1;
         protected override List<string> FieldsToSave => ["Id", "Name", "SymbolString"];
 
-        [JsonConstructor] // Telling Json.NET to use this constructor
+        [JsonConstructor] // Telling Json.NET to use this constructor. Probably redundant
         public CardinalCharacteristic(JArray args)
         {
             Id = args[0].Value<int>();
@@ -60,7 +59,6 @@ namespace CCView.CardinalData
         public int Date { get; private set; } = int.MaxValue;
         public string Name { get; private set; } = "Article name required!";
         public string Citation { get; private set; } = "Citation required!";
-        private HashSet<Theorem> Results { get; set; } = []; // Lets keep this private until we know if we need it
         // We're not going to save the subordinate Theorems, since these can be reconstructed at runtime
         protected override List<string> FieldsToSave => ["Id", "Date", "Name", "Citation"];
         public Article(int id, int date, string name, string citation)
@@ -95,123 +93,106 @@ namespace CCView.CardinalData
             this.Id = RelationDatabase.NewDictId<Article>(rD.Articles, fast);
         }
     }
-
-    // To-do list regarding the 'N' type relations:
-    // // Transitive closure: Con(a > b) && b \geq c => Con(a > c)
-    // // 'IsDerived' status in relations, with an associate List<Relation> showing their working out
-    // // Maybe we have two dictionaries: CCStatus Dictionary<(CC, CC), Char> so that CCStatus[(a, b)] = 'X' iff there is a relation of type 'X',
-    // // // and CCWitnesses Dictionary<(CC, CC), HashSet<Relation>> so that CCStatus[(a, b)] is all the relations between a and b.
-    // // // We would need to figure out a strict hierarchy for relation types, but that should be possible with the relations in mind (i.e. =, >, N, =suc, etc)
-    // // // This saves repeatedly asking about adjacency and possibly even saves memory.
-    // // // We should also store the dictionaries I suppose. Should we give Relations ids?
-
-    public class Relation : JsonCRTP<Relation>
+    // "Atomic" unit of proof, one theorem or model that implies one or more relations directly
+    public class Theorem : JsonCRTP<Theorem>
     {
-        public CC Item1 { get; set; }
-        public int Item1Id { get; set; } = -1;
-        public CC Item2 { get; set; }
-        public int Item2Id { get; set; } = -1;
-        public Char Type { get; set; }
-        public int TypeId { get; set; } = -1;
-        public HashSet<AtomicRelation> Derivation { get; set; } = [];
-        public HashSet<IntFive> DerIds { get; set; } = [];
-        public int Age => Derivation.Select(a => a.Witness.Article.Date).Max();
-        // '>' refers to ZFC \vdash Item1 \geq Item2
-        // 'C' refers to Con(ZFC + Item1 > Item2). That is, Item2 \geq Item1 is unprovable
-        protected override List<string> FieldsToSave => ["Item1.Id", "Item2.Id", "TypeId", "DerIds"];
-        //[JsonSaveableConstructor]
-        public Relation(JArray args, List<CC> cardinals)
+        public int ArtId { get; set; } = -1;
+        public Article Article { get; set; } = null!;
+        // Results is directly proved relations between cardinals in the description
+        // If there is a model that implicitly proves certain relations, use the Model subclass
+        public HashSet<Sentence> Results { get; set; } = [];
+        public string Description { get; set; } = "No description provided.";
+        protected override List<string> FieldsToSave => ["Id", "ArtId", "Description", "Results"];
+        public Theorem(int id, Article article, HashSet<Sentence> results, string description)
         {
-            Item1Id = args[0].Value<int>();
-            Item2Id = args[1].Value<int>();
-            Item1 = cardinals[Item1Id];
-            Item2 = cardinals[Item2Id];
-            TypeId = args[2].Value<int>();
-            Type = Sentence.TypeIndices[TypeId];
-            foreach (JArray jArray in args[3].Cast<JArray>())
-            {
-                List<int> newList = [];
-                foreach (JToken token in jArray)
-                {
-                    newList.Add(token.Value<int>());
-                }
-                DerIds.Add(new(newList));
-            }
+            Id = id;
+            Article = article;
+            Results = results;
+            Description = description;
+            ArtId = Article.Id;
         }
-        public Relation() { Item1 = new(); Item2 = new(); }
+        public Theorem() { }
         public override void InstantiateFromJArray(JArray args)
         {
-            Item1Id = args[0].Value<int>();
-            Item2Id = args[1].Value<int>();
-            TypeId = args[2].Value<int>();
-            Type = Sentence.TypeIndices[TypeId];
+            Id = args[0].Value<int>();
+            ArtId = args[1].Value<int>();
+            Description = args[2].Value<string>() ?? "No description provided.";
             foreach (JArray jArray in args[3].Cast<JArray>())
             {
-                List<int> newList = [];
-                foreach (JToken token in jArray)
-                {
-                    newList.Add(token.Value<int>());
-                }
-                DerIds.Add(new(newList));
+                Results.Add(Sentence.FromJArray(jArray));
             }
         }
-        public Relation(CC item1, CC item2, char type)
+        public override bool Equals(object? obj)
         {
-            Item1 = item1;
-            Item2 = item2;
-            Type = type;
-            TypeId = Sentence.TypeIndices.IndexOf(type);
+            return obj is Theorem other && Id.Equals(other.Id);
         }
-        public Relation(CC item1, CC item2, char type, IEnumerable<AtomicRelation> derivation) : this(item1, item2, type)
+        public bool VerbEquals(object? obj)
         {
-            Derivation = derivation.ToHashSet();
-            DerIds = [];
-            foreach (AtomicRelation atom in derivation)
+            if (obj is Theorem other)
             {
-                if (atom.Witness is Model)
+                if (!Id.Equals(other.Id))
                 {
-                    DerIds.Add(new(atom.Item1.Id, atom.Item2.Id, Sentence.TypeIdFromChar(atom.Type), 1, atom.Witness.Id));
+                    Console.WriteLine($"this.Id ({this}.{Id}) != other.Id ({other}.{other.Id})");
+                    return false;
                 }
-                else
-                {
-                    DerIds.Add(new(atom.Item1.Id, atom.Item2.Id, Sentence.TypeIdFromChar(atom.Type), 0, atom.Witness.Id));
-                }
+                return true;
             }
-        }
-        public Relation(AtomicRelation atom)
-        {
-            Item1 = atom.Item1;
-            Item1Id = Item1.Id;
-            Item2 = atom.Item2;
-            Item2Id = Item2.Id;
-            Type = atom.Type;
-            TypeId = Sentence.TypeIdFromChar(Type);
-            Derivation = [atom];
-            //DerIds = new HashSet<int[]>(new IntArrayComparer());
-            DerIds = [new(Item1Id, Item2Id, TypeId, (atom.Witness is Model) ? 1 : 0, atom.Witness.Id)];
-        }
-
-        public override bool Equals(object? obj) // This needs to be overhauled because of 'signature's.
-        {
-            return obj is Relation other &&
-            Item1.Equals(other.Item1) &&
-            Item2.Equals(other.Item2) &&
-            Type == other.Type &&
-            DerIds.SetEquals(other.DerIds);
+            Console.WriteLine($"obj ({obj}) is not a Theorem");
+            return false;
         }
         public override int GetHashCode()
         {
-            return HashCode.Combine(Item1, Item2, Type, DerIds); // Needs overhauling
+            return Id.GetHashCode();
         }
         public override string ToString()
         {
-            return $"Relation of type {Type} between ID{Item1.Id} ({Item1.SymbolString}) and ID{Item2.Id} ({Item2.SymbolString})"; // Needs overhauling
+            return $"Theorem ID:{Id} '{Description}' of {Article}";
         }
-        public bool ResultEquals(Relation other)
+    }
+    public class Model : JsonCRTP<Model>
+    {
+        public Article Article { get; set; } = new();
+        public int ArtId { get; set; } = -1;
+        public string Description { get; set; } = "No description provided.";
+        public HashSet<(CC Cardinal, int Aleph, Theorem Witness)> Values { get; set; } = [];
+        public HashSet<IntThree> ValIds { get; set; } = [];
+        protected override List<string> FieldsToSave => ["Id", "Article.Id", "ResIds", "Description", "ValIds"];
+        private readonly int Cid = Sentence.TypeIdFromChar('C');
+        public Model(int id, Article article, string description, HashSet<(CC Cardinal, int Aleph, Theorem Witness)> values)
         {
-            return Item1 == other.Item1
-                && Item2 == other.Item2
-                && Type == other.Type;
+            Id = id;
+            Description = description;
+            Article = article;
+            Values = values;
+            ArtId = article.Id;
+            foreach ((CC Cardinal, int Aleph, Theorem Witness) tup in Values)
+            {
+                ValIds.Add(new(tup.Cardinal.Id, tup.Aleph, tup.Witness.Id));
+            }
+        }
+        public Model() { }
+        public override void InstantiateFromJArray(JArray args)
+        {
+            Id = args[0].Value<int>();
+            ArtId = args[1].Value<int>();
+            Description = args[3].Value<string>() ?? "No description provided!";
+            foreach (JArray alephArray in args[4].Cast<JArray>())
+            {
+                List<int> newList = alephArray.Value<List<int>>()!;
+                ValIds.Add(new(newList));
+            }
+        }
+        public override bool Equals(object? obj)
+        {
+            return obj is Model other && Id.Equals(other.Id);
+        }
+        public override int GetHashCode()
+        {
+            return Id.GetHashCode();
+        }
+        public override string ToString()
+        {
+            return $"Model ID:{Id} '{Description}' from {Article}";
         }
     }
     // The "Sentence" is the most fundamental statement about cardinal characteristics
@@ -225,50 +206,88 @@ namespace CCView.CardinalData
         /// >, [x.Id, y.Id] means 'CC x, CC y, and ZFC proves x \geq y'
         /// C, [x.Id, y.Id] means 'CC x, CC y, and Con(ZFC + x > y)'
         /// X, [any] means 'You forgot to assign a Type'
-        /// V, [x.Id, n, m.Id] means 'CC x, Model m, and m \models x = \aleph_n'
+        /// V, [m.Id, x.Id, n] means 'CC x, Model m, and m \models x = \aleph_n'
+        /// G, [m.Id, x.Id, n] means 'CC x, Model m, and m \models x \geq \aleph_n'
+        /// L, [m.Id, x.Id, n] means 'CC x, Model m, and m \models x \leq \aleph_n'
+        /// =, [x.Id, y.Id] means 'CC x, CC y, and ZFC proves x = y'
         /// </summary>
-        public static List<Char> TypeIndices { get; private set; } = ['>', 'C', 'X', 'V'];
+        public static List<char> TypeIndices { get; } = ['>', 'C', 'X', 'V', 'G', 'L', '='];
+        public static List<char> CtoCTypes { get; } = ['>', 'C', '='];
+        public static List<char> MCNTypes { get; } = ['V', 'G', 'L'];
         public Sentence() { }
         public Sentence(char type, List<int> ids)
         {
             Type = type;
             Ids = ids;
-            switch (Type)
+            List<char> anticipatedTypes = CtoCTypes.Union(MCNTypes).ToList();
+            anticipatedTypes.Add('X');
+            if (!anticipatedTypes.Contains(Type))
             {
-                case '>':
-                    if (Ids.Count != 2) throw new ArgumentException("Ids for a '>' type sentence must be two Ids of cardinal characteristics.");
-                    break;
-                case 'C':
-                    if (Ids.Count != 2) throw new ArgumentException("Ids for a '>' type sentence must be two Ids of cardinal characteristics.");
-                    break;
-                case 'X':
-                    Console.WriteLine("Warning: You have instantiated a new type 'X' sentence.");
-                    break;
-                case 'V':
-                    if (Ids.Count != 3) throw new ArgumentException("Ids for a 'V' type sentence must be one cardinal id, one number and one model id.");
-                    break;
+                throw new NotImplementedException($"Sentence {this} has unanticipated type {Type}.");
+            }
+            if (CtoCTypes.Contains(Type) && Ids.Count != 2)
+            {
+                throw new ArgumentException($"Ids for a '{Type}' type sentence must be two Ids of cardinal characteristics.");
+            }
+            if (MCNTypes.Contains(Type) && Ids.Count != 3)
+            {
+                throw new ArgumentException($"Ids for a '{Type}' type sentence must be one model id, one cardinal characteristic id and one positive number.");
+            }
+            if (Type.Equals('X'))
+            {
+                Console.WriteLine("Warning: You have instantiated a new type 'X' sentence.");
             }
         }
+        public Sentence(CC item1, CC item2, char type) : this(type, [item1.Id, item2.Id]) { }
         public override JArray TurnToJson()
         {
-            JArray jArray = [Sentence.TypeIdFromChar(Type)];
-            JArray subArray = [];
-            foreach (int i in Ids)
-            {
-                subArray.Add(JObject.FromObject(i));
-            }
-            jArray.Add(subArray);
+            JArray jArray = [];
+            JToken TypeIdJTok = JToken.FromObject(TypeIdFromChar(Type));
+            jArray.Add(TypeIdJTok);
+            JArray idsArray = JArray.FromObject(Ids);
+            jArray.Add(idsArray);
+            //JArray subArray = [];
+            //foreach (int i in Ids)
+            //{
+            //    subArray.Add(JObject.FromObject(i));
+            //}
+            //jArray.Add(subArray);
             return jArray;
         }
         public static Sentence FromJArray(JArray args)
         {
-            return new(Sentence.TypeIndices[args[0].Value<int>()], args[1].Value<List<int>>() ?? []);
+            List<int> newIds = args[1].Select(t => t.Value<int>()).ToList();
+            //List<int> newIds = [];
+            //foreach (JToken arg in args[1])
+            //{
+            //    newIds.Add(arg.Value<int>());
+            //}
+            return new(Sentence.TypeIndices[args[0].Value<int>()], newIds);
         }
         public override bool Equals(object? obj)
         {
             return obj is Sentence other
                 && Type == other.Type
                 && Enumerable.SequenceEqual(Ids, other.Ids);
+        }
+        public bool VerbEquals(object? obj)
+        {
+            if (obj is Sentence other)
+            {
+                if (Type != other.Type)
+                {
+                    Console.WriteLine($"this.Type ({this}.{Type}) != other.Type ({other}.{other.Type})");
+                    return false;
+                }
+                if (!Enumerable.SequenceEqual(Ids, other.Ids))
+                {
+                    Console.WriteLine($"Enumerable.SequenceEqual(this.Ids ({this}.{Ids}), other.Ids({other}.{other.Ids}) = false");
+                    return false;
+                }
+                return true;
+            }
+            Console.WriteLine($"obj ({obj}) is not a Sentence");
+            return false;
         }
         public override int GetHashCode()
         {
@@ -299,35 +318,89 @@ namespace CCView.CardinalData
         {
             return TypeIndices.IndexOf(type);
         }
+        public int GetItem1()
+        {
+            if (CtoCTypes.Contains(Type)) return Ids[0];
+            else throw new ArgumentException($"Type {Type} Sentences do not have an Item1.");
+        }
+        public int GetItem2()
+        {
+            if (CtoCTypes.Contains(Type)) return Ids[1];
+            else throw new ArgumentException($"Type {Type} Sentences do not have an Item2.");
+        }
+        public int GetModel()
+        {
+            if (MCNTypes.Contains(Type)) return Ids[0];
+            else throw new ArgumentException($"Type {Type} Sentences do not have a Model.");
+        }
+        public int GetCC()
+        {
+            if (MCNTypes.Contains(Type)) return Ids[1];
+            else throw new ArgumentException($"Type {Type} Sentences do not have a CC. Did you mean GetItem1 or GetItem2?");
+        }
+        public int GetAleph()
+        {
+            if (MCNTypes.Contains(Type)) return Ids[2];
+            else throw new ArgumentException($"Type {Type} Sentences do not have an Aleph.");
+        }
     }
     // "Atomic" relation that is proved directly by a single model or theorem
     // AtomicRelations (and Relations) then derive further Relations that have a witnessing signature of atomic relations
     public class AtomicRelation : JsonToArray
     {
         public Sentence Statement { get; set; } = new();
-        public CC Item1 { get; set; } = new();
-        public CC Item2 { get; set; } = new();
         public Char Type => Statement.Type;
         public Theorem Witness { get; set; } = new();
+        public int WitnessId { get; set; }
+        public AtomicRelation(Sentence statement, Theorem witness)
+        {
+            Statement = statement;
+            Witness = witness;
+            WitnessId = witness.Id;
+        }
         public AtomicRelation(CC item1, CC item2, char type, Theorem witness)
         {
-            Item1 = item1;
-            Item2 = item2;
             Witness = witness;
             Statement = new(type, [item1.Id, item2.Id]);
         }
         public AtomicRelation() { }
         public override JArray TurnToJson()
         {
-            JArray jArray = [JObject.FromObject(Witness.Id)];
+            JArray jArray = [JToken.FromObject(Witness.Id)];
             jArray.Add(Statement.TurnToJson());
             return jArray;
+        }
+        public static AtomicRelation FromJArray(JArray args)
+        {
+            AtomicRelation r = new();
+            r.WitnessId = args[0].Value<int>();
+            r.Statement = Sentence.FromJArray((JArray)args[1]);
+            return r;
         }
         public override bool Equals(object? obj)
         {
             return obj is AtomicRelation other
                 && other.Statement.Equals(Statement)
                 && other.Witness.Equals(Witness);
+        }
+        public bool VerbEquals(object? obj)
+        {
+            if (obj is AtomicRelation other)
+            {
+                if (!Statement.VerbEquals(other.Statement))
+                {
+                    Console.WriteLine($"this.Statement ({this}.{Statement}) != other.Statement ({other}.{other.Statement})");
+                    return false;
+                }
+                if (!Witness.VerbEquals(other.Witness))
+                {
+                    Console.WriteLine($"this.Witness ({this}.{Witness}) != other.Witness ({other}.{other.Witness})");
+                    return false;
+                }
+                return true;
+            }
+            Console.WriteLine($"obj ({obj}) is not an AtomicRelation");
+            return false;
         }
         public override int GetHashCode()
         {
@@ -339,117 +412,320 @@ namespace CCView.CardinalData
             return $"Relation {Statement} from ID{Witness.Id}";
         }
     }
-    // "Atomic" unit of proof, one theorem or model that implies one or more relations directly
-    public class Theorem : JsonCRTP<Theorem>
+    public class Relation : JsonCRTP<Relation>
     {
-        public int ArtId { get; set; } = -1;
-        public Article Article { get; set; } = null!;
-        // Results is directly proved relations between cardinals in the description
-        // If there is a model that implicitly proves certain relations, use the Model subclass
-        public HashSet<(CC, CC, Char)> Results { get; set; } = [];
-        // A ResId is a (CC.Id, CC.Id, TypeId)
-        public HashSet<int[]> ResIds { get; set; } = [];
-        public string Description { get; set; } = "No description provided.";
-        protected override List<string> FieldsToSave => ["Id", "ArtId", "ResIds", "Description"];
+        public Sentence Statement { get; set; } = new();
+        public HashSet<AtomicRelation> Derivation { get; set; } = [];
+        public char Type => Statement.Type;
+        public int Age => Derivation.Count > 0 ? Derivation.Select(a => a.Witness.Article.Date).Max() : int.MaxValue;
+        public List<int> Ids => Statement.Ids;
+        protected override List<string> FieldsToSave => ["Statement", "Derivation"];
+        public Relation() { }
+        public Relation(Sentence statement, HashSet<AtomicRelation>[] derivations)
+        {
+            Statement = statement;
+            Derivation = [];
+            foreach (HashSet<AtomicRelation> der in derivations)
+            {
+                Derivation.UnionWith(der);
+            }
+        }
+        public Relation(Sentence statement, HashSet<AtomicRelation> derivation) : this(statement, [derivation]) { }
         public override void InstantiateFromJArray(JArray args)
         {
-            Id = args[0].Value<int>();
-            ArtId = args[1].Value<int>();
-            foreach (JArray jArray in args[2].Cast<JArray>())
+            Statement = Sentence.FromJArray((JArray)args[0]);
+            foreach (JArray jArray in args[1].Cast<JArray>())
             {
-                List<int> newList = [];
-                foreach (JToken token in jArray)
-                {
-                    newList.Add(token.Value<int>());
-                }
-                int[] newResIds = [.. newList];
-                if (newResIds != null)
-                {
-                    ResIds.Add(newResIds);
-                }
+                Derivation.Add(AtomicRelation.FromJArray(jArray));
             }
-            Description = args[3].Value<string>() ?? "No description provided.";
         }
-        public override bool Equals(object? obj)
+        public Relation(AtomicRelation atom)
         {
-            return obj is Theorem other && Id.Equals(other.Id);
+            Statement = atom.Statement;
+            Derivation = [atom];
+        }
+
+        public override bool Equals(object? obj) // This needs to be overhauled because of 'signature's.
+        {
+            return obj is Relation other
+                && Statement.Equals(other.Statement)
+                && Derivation.SetEquals(other.Derivation);
+        }
+        public bool VerbEquals(object? obj)
+        {
+            if (obj is Relation other)
+            {
+                if (!Statement.VerbEquals(other.Statement))
+                {
+                    Console.WriteLine($"this.Statement ({this}.{Statement}) != other.Statement ({other}.{other.Statement})");
+                    return false;
+                }
+                if (!Derivation.SetEquals(other.Derivation))
+                {
+                    Console.WriteLine($"this.Derivation ({this}.{Derivation}) != other.Derivation ({other}.{other.Derivation})");
+                    return false;
+                }
+                return true;
+            }
+            Console.WriteLine($"obj ({obj}) is not a Relation");
+            return false;
         }
         public override int GetHashCode()
         {
-            return Id.GetHashCode();
+            return HashCode.Combine(Statement, Derivation); // Needs overhauling
         }
         public override string ToString()
         {
-            return $"Theorem ID:{Id} '{Description}' of {Article}";
-        }
-        public Theorem(int id, Article article, HashSet<(CC, CC, char)> results, string description)
-        {
-            Id = id;
-            Article = article;
-            Results = results;
-            Description = description;
-            ArtId = Article.Id;
-            ResIds = Results.Select<(CC, CC, char), int[]>(r => [r.Item1.Id, r.Item2.Id, Sentence.TypeIdFromChar(r.Item3)]).ToHashSet();
-        }
-        public Theorem() { }
-    }
-    public class Model : Theorem
-    {
-        // The idea with CardinalValues is that each set in the list is an equivalence class by equipotence
-        // Then if one set comes before another, the cardinals in the first set are less than those in the second
-        public HashSet<(CC Cardinal, int Aleph, Theorem Witness)> Values { get; set; } = [];
-        public HashSet<IntThree> ValIds { get; set; } = [];
-        protected override List<string> FieldsToSave => ["Id", "Article.Id", "ResIds", "Description", "ValIds"];
-        private readonly int Cid = Sentence.TypeIdFromChar('C');
-        public Model(int id, Article article, HashSet<(CC, CC, char)> results, string description, HashSet<(CC Cardinal, int Aleph, Theorem Witness)> values)
-            : base(id, article, results, description)
-        {
-            Values = values;
-            ArtId = article.Id;
-            ResIds = Results.Select<(CC, CC, char), int[]>(r => [r.Item1.Id, r.Item2.Id, Sentence.TypeIdFromChar(r.Item3)]).ToHashSet();
-            foreach ((CC Cardinal, int Aleph, Theorem Witness) tup in Values)
+            if (Sentence.CtoCTypes.Contains(Statement.Type))
             {
-                ValIds.Add(new(tup.Cardinal.Id, tup.Aleph, tup.Witness.Id));
+                return $"Relation ID{Statement.GetItem1()} {Type} ID{Statement.GetItem2()} ({Derivation.Count} length proof)";
+            }
+            else if (Sentence.MCNTypes.Contains(Statement.Type))
+            {
+                return $"Relation ID{Statement.GetModel()} models ID{Statement.GetCC} {Type} ID{Statement.GetAleph()} ({Derivation.Count} length proof)";
+            }
+            else
+            {
+                return $"Relation {Statement}";
             }
         }
-        public Model() { }
-        public override void InstantiateFromJArray(JArray args)
+        public bool ResultEquals(Relation other)
         {
-            Id = args[0].Value<int>();
-            ArtId = args[1].Value<int>();
-            ResIds = args[2].Value<HashSet<int[]>>() ?? [];
-            Description = args[3].Value<string>() ?? "No description provided!";
-            foreach (JArray alephArray in args[4].Cast<JArray>())
+            return Statement.Equals(other.Statement);
+        }
+        public Relation? Deduce(Relation other)
+        {
+            if (Type == 'X' || other.Type == 'X')
             {
-                List<int> newList = alephArray.Value<List<int>>()!;
-                ValIds.Add(new(newList));
+                return null;
             }
-        }
-        public override bool Equals(object? obj)
-        {
-            return obj is Model other && Id.Equals(other.Id);
-        }
-        public override int GetHashCode()
-        {
-            return Id.GetHashCode();
-        }
-        public override string ToString()
-        {
-            return $"Model ID:{Id} '{Description}' from {Article}";
-        }
-        public void GenerateResults()
-        {
-            foreach ((CC Cardinal, int Aleph, Theorem Witness) val1 in Values)
+            List<char> implementedTypes = ['>', 'C', 'X', 'V', 'G', 'L', '='];
+            if (!implementedTypes.Contains(Type) || !implementedTypes.Contains(other.Type))
             {
-                foreach ((CC Cardinal, int Aleph, Theorem Witness) val2 in Values)
-                {
-                    if (val1.Aleph < val2.Aleph)
+                throw new ArgumentException($"Unanticipated type pair ({Type}, {other.Type}).");
+            }
+            // Potential improvement:
+            // Sentence? newStatement;
+            // Then instead of 'return new(new(...), [Derivation, other.Derivation]);' we have 'newStatement = new(...); break;'
+            // Then at the end we return new(newStatement, [Derivation,other.Derivation]. Cleaner looking code.
+            switch (Type, other.Type)
+            {
+                case ('>', '>'):
+                    if (Ids[1] == other.Ids[0])
                     {
-                        Results.Add(new(val2.Cardinal, val1.Cardinal, 'C'));
-                        ResIds.Add([val2.Cardinal.Id, val1.Cardinal.Id, Cid]);
+                        if (Ids[0] == other.Ids[1])
+                        {
+                            return new(new('=', [Ids[0], Ids[1]]), [Derivation, other.Derivation]);
+                        }
+                        return new(new('>', [Ids[0], other.Ids[1]]), [Derivation, other.Derivation]);
                     }
+                    else if (Ids[0] == other.Ids[1])
+                    {
+                        return new(new('>', [other.Ids[0], Ids[1]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('>', 'C'):
+                    if (other.Ids[1] == Ids[0])
+                    {
+                        return new(new('C', [other.Ids[1], Ids[1]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('>', 'V'):
+                    if (Ids[1] == other.Ids[1])
+                    {
+                        return new(new('G', [other.Ids[0], Ids[0], other.Ids[2]]), [Derivation, other.Derivation]);
+                    }
+                    else if (Ids[0] == other.Ids[1])
+                    {
+                        return new(new('L', [other.Ids[0], Ids[1], other.Ids[2]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('>', 'G'):
+                    if (Ids[1] == other.Ids[1])
+                    {
+                        return new(new('G', [other.Ids[0], Ids[0], other.Ids[2]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('>', 'L'):
+                    if (Ids[0] == other.Ids[1])
+                    {
+                        return new(new('L', [other.Ids[0], Ids[1], other.Ids[2]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('>', '='):
+                    // We can probably just write 'if (Ids.SetEquals(other.Ids))', but that will require further investigation
+                    HashSet<int> thisIdsGE = [Ids[0], Ids[1]];
+                    HashSet<int> otherIdsGE = [other.Ids[0], other.Ids[1]];
+                    if (thisIdsGE.SetEquals(otherIdsGE))
+                    {
+                        return null;
+                    }
+                    if (Ids[0] == other.Ids[0])
+                    {
+                        return new(new('>', [other.Ids[1], Ids[1]]), [Derivation, other.Derivation]);
+                    }
+                    else if (Ids[0] == other.Ids[1])
+                    {
+                        return new(new('>', [other.Ids[0], Ids[1]]), [Derivation, other.Derivation]);
+                    }
+                    else if (Ids[1] == other.Ids[0])
+                    {
+                        return new(new('>', [Ids[0], other.Ids[1]]), [Derivation, other.Derivation]);
+                    }
+                    else if (Ids[1] == other.Ids[1])
+                    {
+                        return new(new('>', [Ids[0], other.Ids[0]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('C', '>'):
+                    return other.Deduce(this);
+                case ('C', 'C'):
+                    return null;
+                case ('C', 'X'):
+                    return null;
+                case ('C', 'V'):
+                    return null;
+                case ('C', 'G'):
+                    return null;
+                case ('C', 'L'):
+                    return null;
+                case ('C', '='):
+                    if (Ids[0] == other.Ids[0])
+                    {
+                        return new(new('C', [other.Ids[1], Ids[1]]), [Derivation, other.Derivation]);
+                    }
+                    else if (Ids[0] == other.Ids[1])
+                    {
+                        return new(new('C', [other.Ids[0], Ids[1]]), [Derivation, other.Derivation]);
+                    }
+                    else if (Ids[1] == other.Ids[0])
+                    {
+                        return new(new('C', [Ids[0], other.Ids[1]]), [Derivation, other.Derivation]);
+                    }
+                    else if (Ids[1] == other.Ids[1])
+                    {
+                        return new(new('C', [Ids[0], other.Ids[0]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('V', '>'):
+                    return other.Deduce(this);
+                case ('V', 'C'):
+                    return other.Deduce(this);
+                case ('V', 'V'):
+                    if (Ids[0] == other.Ids[0]
+                        && Ids[1] != other.Ids[1]
+                        && Ids[2] != other.Ids[2])
+                    {
+                        if (Ids[2] < other.Ids[2])
+                        {
+                            return new(new('C', [other.Ids[1], Ids[1]]), [Derivation, other.Derivation]);
+                        }
+                        else
+                        {
+                            return new(new('C', [Ids[1], other.Ids[1]]), [Derivation, other.Derivation]);
+                        }
+                    }
+                    return null;
+                case ('V', 'G'):
+                    if (Ids[0] == other.Ids[0]
+                        && Ids[1] != other.Ids[1]
+                        && Ids[2] < other.Ids[2])
+                    {
+                        return new(new('C', [other.Ids[1], Ids[1]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('V', 'L'):
+                    if (Ids[0] == other.Ids[0]
+                        && Ids[1] != other.Ids[1]
+                        && Ids[2] > other.Ids[2])
+                    {
+                        return new(new('C', [Ids[1], other.Ids[1]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('V', '='):
+                    if (Ids[1] == other.Ids[0])
+                    {
+                        return new(new('V', [Ids[0], other.Ids[1], Ids[2]]), [Derivation, other.Derivation]);
+                    }
+                    else if (Ids[1] == other.Ids[1])
+                    {
+                        return new(new('V', [Ids[0], other.Ids[0], Ids[2]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('G', '>'):
+                    return other.Deduce(this);
+                case ('G', 'C'):
+                    return other.Deduce(this);
+                case ('G', 'V'):
+                    return other.Deduce(this);
+                case ('G', 'G'):
+                    return null;
+                case ('G', 'L'):
+                    // There's probably a pithy way to say this, but I don't want to risk it for the moment.
+                    if (Ids[0] == other.Ids[0] && Ids[1] == other.Ids[1] && Ids[2] == other.Ids[2])
+                    {
+                        return new(new('V', Ids), [Derivation, other.Derivation]);
+                    }
+                    // You could include a 'watch out for contradictory data' check here
+                    return null;
+                case ('G', '='):
+                    if (Ids[1] == other.Ids[0])
+                    {
+                        return new(new('G', [Ids[0], other.Ids[1], Ids[2]]), [Derivation, other.Derivation]);
+                    }
+                    else if (Ids[1] == other.Ids[1])
+                    {
+                        return new(new('G', [Ids[0], other.Ids[0], Ids[2]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('L', '>'):
+                    return other.Deduce(this);
+                case ('L', 'C'):
+                    return other.Deduce(this);
+                case ('L', 'V'):
+                    return other.Deduce(this);
+                case ('L', 'G'):
+                    return other.Deduce(this);
+                case ('L', 'L'):
+                    return null;
+                case ('L', '='):
+                    if (Ids[1] == other.Ids[0])
+                    {
+                        return new(new('L', [Ids[0], other.Ids[1], Ids[2]]), [Derivation, other.Derivation]);
+                    }
+                    else if (Ids[1] == other.Ids[1])
+                    {
+                        return new(new('L', [Ids[0], other.Ids[0], Ids[2]]), [Derivation, other.Derivation]);
+                    }
+                    return null;
+                case ('=', '>'):
+                    return other.Deduce(this);
+                case ('=', 'C'):
+                    return other.Deduce(this);
+                case ('=', 'V'):
+                    return other.Deduce(this);
+                case ('=', 'G'):
+                    return other.Deduce(this);
+                case ('=', 'L'):
+                    return other.Deduce(this);
+                case ('=', '='):
+                    HashSet<int> allIdsEE = [.. Ids.Union(other.Ids)];
+                    if (allIdsEE.Count != 3)
+                    {
+                        return null;
+                    }
+                    List<(int, int)> twoTimesTwo = [(0, 0), (0, 1), (1, 0), (1, 1)];
+                    foreach ((int i, int j) in twoTimesTwo)
+                    {
+                        if (Ids[i] == other.Ids[j])
+                        {
+                            return new(new('=', [Ids[1 - i], other.Ids[1 - j]]), [Derivation, other.Derivation]);
+                        }
+                    }
+                    throw new ArgumentException($"this.Ids ({this.Ids}) \\cup other.Ids ({other.Ids}) == 3, but this.Ids \\cap other.Ids == \\emptyset...");
+                default:
+                    throw new NotImplementedException($"Relation {this} has unexpected type {Type}.");
                 }
-            }
         }
     }
 }
@@ -471,20 +747,24 @@ namespace CCView.CardinalData.Compute
         public RelationDatabase(Dictionary<int, CC> cardinals, IEnumerable<Relation> relations, Dictionary<int, Article> articles, Dictionary<int, Theorem> theorems, Dictionary<int, Model> models)
         {
             Cardinals = cardinals;
-            foreach (var relation in relations)
-            {
-                Relations.Add(relation);
-                if (!Cardinals.ContainsKey(relation.Item1.Id))
-                    Cardinals[relation.Item1.Id] = relation.Item1;
-                if (!Cardinals.ContainsKey(relation.Item2.Id))
-                    Cardinals[relation.Item2.Id] = relation.Item2;
-            }
+            if (relations is HashSet<Relation> hash) Relations = hash;
+            else Relations = relations.ToHashSet();
             Articles = articles;
             Theorems = theorems;
             Models = models;
         }
         public RelationDatabase()
         {
+        }
+        public CC CardinalFromSentence(Sentence sentence, int ind)
+        {
+            if (ind > 2 || ind == 0) throw new ArgumentException("ind must be 1 or 2.");
+            return Cardinals[sentence.Ids[ind]];
+        }
+        // Cardinal from relation
+        private CC CFR(Relation relation, int ind)
+        {
+            return CardinalFromSentence(relation.Statement, ind);
         }
         public bool PopulateDensity()
         {
@@ -493,20 +773,26 @@ namespace CCView.CardinalData.Compute
             {
                 Program.LoadLog("Computing in-betweenness relation for cardinal characteristics.");
                 Program.LoadLog("First computing transitive closure.");
-                int n = TransClose();
+                int n = LogicTransClose();
                 foreach (Relation r1 in Relations)
                 {
-                    foreach (Relation r2 in Relations)
+                    if (r1.Type == '>')
                     {
-                        if (r1.Item2.Equals(r2.Item1) && r1.Type == '>' && r2.Type == '>')
+                        foreach (Relation r2 in Relations)
                         {
-                            if (Density.TryGetValue((r1.Item1, r2.Item2), out HashSet<CC>? between))
+                            if (r2.Type == '>')
                             {
-                                between.Add(r1.Item2);
-                            }
-                            else
-                            {
-                                Density[(r1.Item1, r2.Item2)] = [r1.Item2];
+                                if (r1.Statement.GetItem2().Equals(r2.Statement.GetItem1()))
+                                {
+                                    if (Density.TryGetValue((CFR(r1, 1), CFR(r2, 2)), out HashSet<CC>? between))
+                                    {
+                                        between.Add(CFR(r1, 2));
+                                    }
+                                    else
+                                    {
+                                        Density[(CFR(r1, 1), CFR(r2, 2))] = [CFR(r1, 2)];
+                                    }
+                                }
                             }
                         }
                     }
@@ -518,62 +804,61 @@ namespace CCView.CardinalData.Compute
             }
             return false;
         }
-        public void CreateTrivialRelations()
+        public int CreateTrivialRelations()
         {
-            if (!TrivialRelationsCreated)
+            if (TrivialRelationsCreated) return 0;
+            int numberOfRelations = Relations.Count;
+            foreach (AtomicRelation a in AtomicRelations)
             {
-                foreach (AtomicRelation a in AtomicRelations)
+                Relation newRel = new(a);
+                if (!Relations.Any(r => r.Equals(newRel)))
                 {
-                    Relation newRel = new(a);
-                    if (!Relations.Any(r => r.Equals(newRel)))
-                    {
-                        Relations.Add(new(a));
-                    }
+                    Relations.Add(newRel);
                 }
-                TrivialRelationsCreated = true;
             }
+            TrivialRelationsCreated = true;
+            return Relations.Count - numberOfRelations;
         }
-        public static HashSet<Relation> ComputeTransitiveClosure(IEnumerable<Relation> relation)
+        public static HashSet<Relation> ComputeDeductiveClosure(IEnumerable<Relation> relations)
         {
-            HashSet<Relation> newRelations = [.. relation]; // This is short for new HashSet<Relation>(relation);
-            Relation testRelation = new(new CC(), new CC(), '>'); // This is to save memory
+            HashSet<Relation> newRelations = [.. relations]; // This is short for new HashSet<Relation>(relation);
+            Dictionary<Sentence, int> ageDict = [];
+            foreach (Relation r in relations)
+            {
+                if (ageDict.TryGetValue(r.Statement, out int age))
+                {
+                    ageDict[r.Statement] = Math.Min(age, r.Age);
+                }
+                else
+                {
+                    ageDict[r.Statement] = r.Age;
+                }
+            }
             bool changed;
             do
             {
                 changed = false;
                 HashSet<Relation> newRelationsToAdd = [];
-                foreach (var relOne in newRelations)
+                foreach (var r1 in newRelations)
                 {
-                    foreach (var relTwo in newRelations)
+                    foreach (var r2 in newRelations)
                     {
-                        if (relOne.Type == 'C' && relTwo.Type == '>')
+                        Relation? dedRel = r1.Deduce(r2);
+                        if (dedRel is Relation newRel)
                         {
-                            // a C b > a is impossible
-                            if (relOne.Item2.Equals(relTwo.Item1)) throw new DataMisalignedException($"RelData {relOne} and {relTwo} are incompatible.");
-                            // a C b > c implies a C c
-                            else if (relOne.Item2.Equals(relTwo.Item1))
+                            if (ageDict.TryGetValue(newRel.Statement, out int age))
                             {
-                                testRelation.Item1 = relOne.Item1;
-                                testRelation.Item2 = relTwo.Item2;
-                                testRelation.Type = 'C';
-                                if (!newRelations.Any(r => r.ResultEquals(testRelation)))
+                                if (newRel.Age < age)
                                 {
-                                    newRelationsToAdd.Add(new Relation(relOne.Item1, relTwo.Item2, 'C', relOne.Derivation.Union(relTwo.Derivation)));
+                                    newRelationsToAdd.Add(newRel);
+                                    ageDict[newRel.Statement] = newRel.Age;
                                     changed = true;
                                 }
                             }
-                        }
-                        // a > b > c implies a > c
-                        else if (relOne.Type == '>' && relTwo.Type == '>')
-                        {
-                            testRelation.Item1 = relOne.Item1;
-                            testRelation.Item2 = relTwo.Item2;
-                            testRelation.Type = '>';
-                            if (relOne.Item2.Equals(relTwo.Item1)
-                                && !newRelations.Any(r => r.ResultEquals(testRelation))
-                                && !relOne.Item1.Equals(relTwo.Item2))
+                            else
                             {
-                                newRelationsToAdd.Add(new Relation(relOne.Item1, relTwo.Item2, relOne.Type, relOne.Derivation.Union(relTwo.Derivation)));
+                                newRelationsToAdd.Add(newRel);
+                                ageDict[newRel.Statement] = newRel.Age;
                                 changed = true;
                             }
                         }
@@ -586,72 +871,41 @@ namespace CCView.CardinalData.Compute
             } while (changed);
             return newRelations;
         }
-        public int TransClose()
+        public int LogicTransClose()
         {
             int n = Relations.Count;
-            Relations = ComputeTransitiveClosure(Relations);
+            Relations = ComputeDeductiveClosure(Relations);
             int m = Relations.Count;
-            Program.LoadLog($"Constructed {m - n} new relations in transitive closure.");
+            Program.LoadLog($"Constructed {m - n} new relations in deductive closure.");
             return m - n;
         }
-        public void AddRelation(CC? a, CC? b, char type, bool lazy = true)
+        public Relation AddCtoCRelation(CC? a, CC? b, char type, Theorem? witness)
         {
-            if (a == null || b == null)
-            {
-                throw new ArgumentException("Neither cardinal may be null.");
-            }
-            else if (!Cardinals.ContainsKey(a.Id) || !Cardinals.ContainsKey(b.Id))
-            {
-                throw new ArgumentException("Both cardinals must be part of the relations.");
-            }
-            HashSet<Relation> toAdd = [new(a, b, type)];
-            if (type == '>' && DynamicDensity)
-            {
-                List<CC> intoA = [];
-                List<CC> outOfB = [];
-                // In this case we may assume that Relations is already transitive
-                foreach (Relation r in Relations)
-                {
-                    if (r.Type == '>')
-                    {
-                        if (r.Item2.Equals(a))
-                        {
-                            intoA.Add(r.Item1);
-                            toAdd.Add(new(r.Item1, b, '>'));
-                        }
-                        else if (r.Item1.Equals(b))
-                        {
-                            outOfB.Add(r.Item2);
-                            toAdd.Add(new(a, r.Item2, '>'));
-                        }
-                    }
-                }
-                foreach (CC cIn in intoA)
-                {
-                    foreach (CC cOut in outOfB)
-                    {
-                        toAdd.Add(new(cIn, cOut, '>'));
-                    }
-                }
-                foreach (var rel in toAdd)
-                {
-                    Relations.Add(rel);
-                }
-            }
-            else if (!lazy)
-            {
-                foreach (var rel in toAdd)
-                {
-                    Relations.Add(rel);
-                }
-                Relations = ComputeTransitiveClosure(Relations);
-            }
+            if (!Sentence.CtoCTypes.Contains(type)) throw new ArgumentException($"AddCtoCRelation cannot be called with type {type}.");
+            else if (a == null || b == null) throw new ArgumentException("Neither cardinal may be null.");
+            else if (witness == null) throw new ArgumentException("The theorem may not be null.");
             else
             {
-                foreach (var rel in toAdd)
-                {
-                    Relations.Add(rel);
-                }
+                Sentence statement = new(type, [a.Id, b.Id]);
+                AtomicRelation atom = new(statement, witness);
+                Relation newRelation = new(atom);
+                Relations.Add(newRelation);
+                return newRelation;
+            }
+        }
+        public Relation AddMCNRelation(Model? m, CC? c, int n, char type, Theorem? witness)
+        {
+            if (!Sentence.MCNTypes.Contains(type)) throw new ArgumentException($"AddMCNRelation cannot be called with type {type}.");
+            else if (m == null) throw new ArgumentException("The model cannot be null.");
+            else if (c == null) throw new ArgumentException("The cardinal cannot be null.");
+            else if (witness == null) throw new ArgumentException("The theorem cannot be null.");
+            else
+            {
+                Sentence statement = new(type, [m.Id, c.Id, n]);
+                AtomicRelation atom = new(statement, witness);
+                Relation newRelation = new(atom);
+                Relations.Add(newRelation);
+                return newRelation;
             }
         }
         public static int NewDictId<T>(Dictionary<int, T> dict, bool fast = false)
@@ -713,44 +967,47 @@ namespace CCView.CardinalData.Compute
         {
             AddCardinal(name, symbol, NewDictId<CC>(Cardinals, fast));
         }
-        public bool IsRelated(CC a, CC b, char type)
-        {
-            return Relations.Contains(new Relation(a, b, type));
-        }
-        public HashSet<Relation> GetMinimalRelations(List<CC> desiredCardinals)
+        public HashSet<Relation> GetMinimalRelations(Dictionary<int, CC> desiredCardinals)
         {
             return DynamicDensity // : ? is a ternary relation. P : A ? B means "IF P THEN A ELSE B".
                 ? GraphAlgorithm.DensityTransitiveReduction(desiredCardinals, Relations, Density)
                 : GraphAlgorithm.TransitiveReduction(desiredCardinals, Relations);
         }
-        public CC? GetCardinalById(int id)
+        public static T? GetTByIdOrDefault<T>(Dictionary<int, T> dict, int id, T? def)
         {
-            if (Cardinals.TryGetValue(id, out CC? match))
+            if (dict.TryGetValue(id, out T? match))
             {
                 return match;
             }
             else
             {
-                Console.WriteLine($"WARNING: No cardinal with id {id} found. Returning null.");
-                return null;
+                Console.WriteLine($"WARNING: No object type {typeof(T)} with id {id} found. Returning null.");
+                return def;
             }
+        }
+        public CC? GetCardinalById(int id)
+        {
+            return GetTByIdOrDefault(Cardinals, id, null);
         }
         public Article? GetArticleById(int id)
         {
-            if (Articles.TryGetValue(id, out Article? match))
-            {
-                return match;
-            }
-            else
-            {
-                Console.WriteLine($"WARNING: No article with id {id} found. Returning null.");
-                return null;
-            }
+            return GetTByIdOrDefault(Articles, id, null);
         }
-
-        public void AddRelationByIds(int id1, int id2, char type)
+        public Theorem? GetTheoremById(int id)
         {
-            AddRelation(GetCardinalById(id1), GetCardinalById(id2), type);
+            return GetTByIdOrDefault(Theorems, id, null);
+        }
+        public Model? GetModelById(int id)
+        {
+            return GetTByIdOrDefault(Models, id, null);
+        }
+        public void AddCtoCRelationByIds(int id1, int id2, char type, int witnessId)
+        {
+            AddCtoCRelation(GetCardinalById(id1), GetCardinalById(id2), type, GetTheoremById(witnessId));
+        }
+        public void AddMCNRelationByIds(int modId, int ccId, int n, char type, int witnessId)
+        {
+            AddMCNRelation(GetModelById(modId), GetCardinalById(ccId), n, type, GetTheoremById(witnessId));
         }
         public CC GetCardinalBySymbol(string symbol)
         {
@@ -764,48 +1021,23 @@ namespace CCView.CardinalData.Compute
                 throw new ArgumentException($"No cardinal with symbol {symbol} found.");
             }
         }
-        public void GenerateAtoms()
+        public int GenerateAtoms()
         {
-            foreach (Theorem thm in Theorems.Values.Union(Models.Values))
+            int numberOfAtoms = AtomicRelations.Count;
+            foreach (Theorem thm in Theorems.Values)
             {
                 AtomicRelations.UnionWith(GenerateAtoms(thm));
             }
-        }
-        public void AddAtomsToRelations()
-        {
-            foreach (Relation rel in Relations)
-            {
-                foreach (IntFive der in rel.DerIds)
-                {
-
-                    throw new NotImplementedException();
-                }
-            }
+            return AtomicRelations.Count - numberOfAtoms;
         }
         public static HashSet<AtomicRelation> GenerateAtoms(Theorem theorem)
         {
             HashSet<AtomicRelation> newAtoms = [];
-            foreach (var tup in theorem.Results)
+            foreach (var sentence in theorem.Results)
             {
-                newAtoms.Add(new(tup.Item1, tup.Item2, tup.Item3, theorem));
+                newAtoms.Add(new(sentence, theorem));
             }
             return newAtoms;
-        }
-    }
-    class IntArrayComparer : IEqualityComparer<int[]>
-    {
-        public bool Equals(int[]? x, int[]? y)
-        {
-            if (x == null || y == null) return x == y;
-            return x.SequenceEqual(y);
-        }
-        public int GetHashCode(int[] obj)
-        {
-            if (obj == null) return 0;
-            unchecked
-            {
-                return HashCode.Combine(obj.ToList());
-            }
         }
     }
 }
@@ -815,7 +1047,7 @@ namespace CCView.CardinalData.QGInterface
     public class RelEdge : Edge<CC>
     {
         public Relation Relation { get; }
-        public RelEdge(Relation relation) : base(relation.Item1, relation.Item2)
+        public RelEdge(Relation relation, RelationDatabase rd) : base(rd.GetCardinalById(relation.Ids[0])!, rd.GetCardinalById(relation.Ids[1])!)
         {
             Relation = relation;
         }
