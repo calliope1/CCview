@@ -1,14 +1,20 @@
 [
   [
-    0,
-    20240819,
-    "The Hartogs-Lindenbaum spectrum of symmetric extensions",
-    "@article{Zbl7898322,\r\n  author   = \"Ryan-Smith, Calliope\",\r\n  title    = \"The Hartogs-Lindenbaum spectrum of symmetric extensions\",\r\n  journal  = \"Math. Log. Q.\",\r\n  volume   = \"70\",\r\n  year     = \"2024\",\r\n  note     = \"Zbl 7898322\"\n}"
+    -3,
+    99999999,
+    "Unknown",
+    "No citation"
   ],
   [
-    1,
+    -2,
     99999999,
-    "Test",
-    "Test"
+    "Folklore",
+    "No citation"
+  ],
+  [
+    0,
+    20100511,
+    "Combinatorial cardinal characteristics of the continuum",
+    "@article{Zbl5810561,\r\n  author   = \"Blass, Andreas\",\r\n  title    = \"Combinatorial cardinal characteristics of the continuum\",\r\n  year     = \"2010\",\r\n  note     = \"Zbl 5810561\"\n}"
   ]
 ]

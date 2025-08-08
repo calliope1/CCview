@@ -26,7 +26,7 @@ namespace CCView.GraphLogic
                 }
                 if (agedRels.TryGetValue((r.Item1Id, r.Item2Id), out Relation? other))
                 {
-                    if (r.Age < other.Age || other == null)
+                    if (r.Birthday < other.Birthday || other == null)
                     {
                         agedRels[(r.Item1Id, r.Item2Id)] = r;
                     }
@@ -48,8 +48,9 @@ namespace CCView.GraphLogic
             {
                 if (r1.Type == '=')
                 {
-                    teamNames[r1.Item1Id].Add(r1.Item2Id);
-                    teamNames[r1.Item2Id].Add(r1.Item1Id);
+                    if (!validIds.Contains(r1.Item1Id) || !validIds.Contains(r1.Item2Id)) { continue; }
+                    teamNames[r1.Item1Id].UnionWith(teamNames[r1.Item2Id]);
+                    teamNames[r1.Item2Id].UnionWith(teamNames[r1.Item1Id]);
                     continue;
                 }
                 else if (r1.Type == '>')
@@ -60,8 +61,8 @@ namespace CCView.GraphLogic
                             && r1.Item1Id.Equals(r2.Item2Id)
                             && r1.Item2Id.Equals(r2.Item1Id))
                         {
-                            teamNames[r1.Item1Id].Add(r1.Item2Id);
-                            teamNames[r2.Item1Id].Add(r2.Item2Id);
+                            teamNames[r1.Item1Id].UnionWith(teamNames[r1.Item2Id]);
+                            teamNames[r2.Item1Id].UnionWith(teamNames[r2.Item2Id]);
                         }
                     }
                 }
@@ -69,7 +70,16 @@ namespace CCView.GraphLogic
             HashSet<HashSet<CC>> classes = [];
             foreach (HashSet<int> team in teamNames.Values)
             {
-                classes.Add(team.Select(i => cardinals[i]).ToHashSet());
+                HashSet<CC> equivalenceClass = [];
+                foreach (int id in team)
+                {
+                    if (cardinals.TryGetValue(id, out CC? value))
+                    {
+                        equivalenceClass.Add(value);
+                    }
+                }
+                if (classes.Any(c => c.SetEquals(equivalenceClass))) { continue; }
+                classes.Add(equivalenceClass);
             }
             return classes;
         }
@@ -120,14 +130,14 @@ namespace CCView.GraphLogic.Vis
             Console.WriteLine($"DOT file written to {outputDotPath}");
         }
 
-        public static void WritePngFile(string dotFilePath, string dotFileName, string outputFilePath, string outputFileName)
+        public static void WritePngFile(string dotFilePath, string dotFileName, string outputFilePath, string outputFileName, string dotArgument)
         {
             var process = new System.Diagnostics.Process
             {
                 StartInfo = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = "dot",
-                    Arguments = $"-Tpng \"{Path.Combine(dotFilePath, dotFileName)}\" -o \"{Path.Combine(outputFilePath, outputFileName)}\"",
+                    Arguments = $"{dotArgument} \"{Path.Combine(dotFilePath, dotFileName)}\" -o \"{Path.Combine(outputFilePath, outputFileName)}\"",
                     WorkingDirectory = outputFilePath,
                     RedirectStandardOutput = false,
                     UseShellExecute = false,
@@ -180,15 +190,15 @@ namespace CCView.GraphLogic.Algorithms
             }
             return minimalRelations;
         }
-        public static HashSet<Relation> DensityTransitiveReduction(Dictionary<int, CC> cardinals, Dictionary<int, Relation> relations, Dictionary<(CC, CC), HashSet<CC>> density)
+        public static HashSet<Relation> DensityTransitiveReduction(Dictionary<int, CC> cardinals, Dictionary<int, Relation> relations, Dictionary<(int, int), HashSet<int>> density)
         {
             HashSet<Relation> minimalRelations = [];
             foreach (Relation r in relations.Values)
             {
                 if (r.Type != '>') continue;
                 // If density[(a, b)] is empty then it won't even be a key
-                if (density.TryGetValue((cardinals[r.Item1Id], cardinals[r.Item2Id]), out HashSet<CC>? inBetween)
-                    && inBetween.Intersect(cardinals.Values).Any()) continue;
+                if (density.TryGetValue((r.Item1Id, r.Item2Id), out HashSet<int>? inBetween)
+                    && inBetween.Intersect(cardinals.Values.Select(cardinal => cardinal.Id)).Any()) continue;
                 minimalRelations.Add(r);
             }
             return minimalRelations;

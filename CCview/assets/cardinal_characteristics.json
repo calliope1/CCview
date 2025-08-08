@@ -1,62 +1,127 @@
 [
   [
     0,
-    "bounding number",
-    "B"
+    "Aleph_1",
+    "Aleph_1"
   ],
   [
     1,
-    "dominating number",
-    "D"
-  ],
-  [
-    2,
     "Continuum",
     "C"
   ],
   [
+    2,
+    "Bounding number",
+    "B"
+  ],
+  [
     3,
-    "cof(N)",
-    "cof(N)"
+    "Dominating number",
+    "D"
   ],
   [
     4,
-    "cof(M)",
-    "cof(M)"
+    "Splitting number",
+    "S"
   ],
   [
     5,
-    "non(M)",
-    "non(M)"
+    "Reaping number",
+    "R"
   ],
   [
     6,
-    "cov(N)",
-    "cov(N)"
-  ],
-  [
-    7,
-    "non(N)",
-    "non(N)"
-  ],
-  [
-    8,
-    "cov(M)",
-    "cov(M)"
-  ],
-  [
-    9,
-    "add(M)",
+    "Additivity of Meagre",
     "add(M)"
   ],
   [
+    7,
+    "Covering of Meagre",
+    "cov(M)"
+  ],
+  [
+    8,
+    "Uniformity of Meagre",
+    "non(M)"
+  ],
+  [
+    9,
+    "Cofinality of Meagre",
+    "cof(M)"
+  ],
+  [
     10,
-    "add(N)",
+    "Additivity of Null",
     "add(N)"
   ],
   [
     11,
-    "Aleph-1",
-    "Aleph1"
+    "Covering of Null",
+    "cov(N)"
+  ],
+  [
+    12,
+    "Uniformity of Null",
+    "non(N)"
+  ],
+  [
+    13,
+    "Cofinality of Null",
+    "cof(N)"
+  ],
+  [
+    14,
+    "Distributivity number",
+    "H"
+  ],
+  [
+    15,
+    "Tower number",
+    "T"
+  ],
+  [
+    16,
+    "Cofinality of continuum",
+    "cf(C)"
+  ],
+  [
+    17,
+    "Pseudointersection number",
+    "P"
+  ],
+  [
+    18,
+    "Groupwise density number",
+    "G"
+  ],
+  [
+    19,
+    "Martin's axiom number",
+    "M"
+  ],
+  [
+    20,
+    "Almost disjointness number",
+    "A"
+  ],
+  [
+    21,
+    "Independence number",
+    "I"
+  ],
+  [
+    22,
+    "Ultrafilter number",
+    "U"
+  ],
+  [
+    23,
+    "Evasion number",
+    "E"
+  ],
+  [
+    24,
+    "Martin's axiom number for sigma-centred",
+    "M(sigma-centred)"
   ]
 ]
