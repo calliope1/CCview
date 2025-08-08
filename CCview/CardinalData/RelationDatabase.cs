@@ -497,6 +497,48 @@ namespace CCView.CardinalData
                 return $"Relation type {Type} with statement {Statement} ({Derivation.Count} length proof, ID{Id})";
             }
         }
+        public string ToVerboseString(RelationDatabase rd)
+        {
+            string returnString = $"Relation ID {Id}";
+            if (Sentence.CtoCTypes.Contains(Type))
+            {
+                returnString += $"\n{rd.GetCardinalById(Item1Id)} {Type} {rd.GetCardinalById(Item2Id)}";
+            }
+            else if (Sentence.MCNTypes.Contains(Type))
+            {
+                returnString += $"\n{rd.GetModelById(ModelId)} models {rd.GetCardinalById(CardinalId)} {Type} Aleph_{Aleph}";
+            }
+            else
+            {
+                if (Ids.Count == 0)
+                {
+                    returnString += $"\nUnanticipated type {Type} relation with no ids";
+                }
+                else
+                {
+                    returnString += $"\nUnanticipated type {Type} relation with ids [";
+                    foreach (int i in Ids)
+                    {
+                        returnString += $"{i}, ";
+                    }
+                    returnString = returnString[.. (returnString.Length - 2)];
+                    returnString += "]";
+                }
+            }
+            if (Ids.Count == 0)
+            {
+                returnString += "\nNo derivation for this relation (that shouldn't happen...).";
+            }
+            else
+            {
+                returnString += $"\n Derivation is length {Ids.Count}:";
+                foreach (AtomicRelation atomicRelation in Derivation)
+                {
+                    returnString += $"\n{atomicRelation}";
+                }
+            }
+            return returnString;
+        }
         public string ToStringBySymbol(RelationDatabase rd)
         {
             if (Sentence.CtoCTypes.Contains(Type))
@@ -1071,6 +1113,11 @@ namespace CCView.CardinalData.Compute
         public CC? GetCardinalById(int id)
         {
             return GetTByIdOrDefault(Cardinals, id, null);
+        }
+
+        public Relation? GetRelationById(int id)
+        {
+            return GetTByIdOrDefault(Relations, id, null);
         }
         public Article? GetArticleById(int id)
         {

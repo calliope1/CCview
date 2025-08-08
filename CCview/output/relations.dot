@@ -11,6 +11,7 @@ digraph G {
 9 [label="add(M)"];
 10 [label="add(N)"];
 11 [label="Aleph1"];
+12 [label="XYZ"];
 0 -> 9;
 1 -> 0;
 }

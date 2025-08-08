@@ -5,6 +5,7 @@
 // Better command line interface for plotting
 // Commands to add custom articles, theorems and models
 // Implement 'best (oldest) proof' style logic (done?)
+// Add validators to the arguments and options
 
 // Dependencies
 // These need to be cleaned up at some point
@@ -14,6 +15,7 @@ using CCView.JsonHandler;
 using System;
 using System.Collections;
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Net.Http;
 using System.Reflection;
 using System.Reflection.Metadata.Ecma335;
@@ -110,7 +112,7 @@ namespace CCView
             Option<string> fileOption = new("--saveAs")
             {
                 Description = "Save as a specified file.",
-                DefaultValueFactory = p => null! // Null-forgiving operator
+                DefaultValueFactory = p => null!
             };
 
             Option<bool> densityOption = new("--btwn")
@@ -187,7 +189,7 @@ namespace CCView
 
             Argument<string> descriptionArgument = new("Description")
             {
-                Description = "Description of the new object. Underscores will be interpreted as spaces.",
+                Description = "Description of the new object.",
                 DefaultValueFactory = p => "No description provided"
             };
 
@@ -305,7 +307,6 @@ namespace CCView
                 int id = pR.GetValue(idOption);
                 int articleId = pR.GetValue(articleIdArgument);
                 string description = pR.GetValue(descriptionArgument) ?? "No description provided";
-                description = description.Replace('_', ' ');
                 Article article = env.RelData.GetArticleById(articleId) ?? throw new ArgumentException($"{articleId} is not a valid article id");
                 if (id == -1)
                 {
@@ -356,7 +357,6 @@ namespace CCView
             {
                 int articleId = pR.GetValue(articleIdArgument);
                 string description = pR.GetValue(descriptionArgument) ?? "No description provided";
-                description = description.Replace('_', ' ');
                 int id = pR.GetValue(idOption);
                 Article article = env.RelData.GetArticleById(articleId) ?? throw new ArgumentException($"{articleId} is not a valid article id");
                 if (id == -1)
@@ -367,6 +367,7 @@ namespace CCView
                 {
                     env.AddModel(article, description, id);
                 }
+                return 0;
             });
 
             // Add relation
@@ -374,24 +375,46 @@ namespace CCView
             Command createRelation = new("relation", "Legacy functionality. Add a relation between two cardinals.")
             {
                 witnessIdArgument,
-                idsArgument,
-                typeOption
+                typeArgument,
+                idsArgument
             };
             createCommand.Subcommands.Add(createRelation);
 
             createRelation.SetAction(pR =>
             {
-                int[] ids = pR.GetValue(idsArgument)!; // ! here is the null-forgiving operator, which is okay because we know that it is never null
-                string typeString = pR.GetValue(typeOption) ?? "X";
+                int[] ids = pR.GetValue(idsArgument) ?? throw new ArgumentException("You must include ids for the new relation");
+                string typeString = pR.GetValue(typeArgument) ?? throw new ArgumentException("You must include a relation type");
                 char type = typeString[0];
                 int witnessId = pR.GetValue(witnessIdArgument);
-                env.RelateCardinals(ids[0], ids[1], type, witnessId);
-                if (Program._loadLog)
+                if (Sentence.CtoCTypes.Contains(type))
                 {
-                    var c1 = env.RelData.GetCardinalById(ids[0]);
-                    var c2 = env.RelData.GetCardinalById(ids[1]);
-                    Console.WriteLine($"Cardinals {c1} and {c2} related with type '{type}' relation.");
+                    if (ids.Length != 2) throw new ArgumentException($"Exactly two ids required for type {type} relations. You have provided {ids.Length}.");
+                    env.RelateCtoC(ids[0], ids[1], type, witnessId);
+                    if (Program._loadLog)
+                    {
+                        var c1 = env.RelData.GetCardinalById(ids[0]);
+                        var c2 = env.RelData.GetCardinalById(ids[1]);
+                        Console.WriteLine($"Cardinals {c1} and {c2} related with type '{type}' relation.");
+                    }
+                    return 0;
                 }
+                else if (Sentence.MCNTypes.Contains(type))
+                {
+                    if (ids.Length != 3) throw new ArgumentException($"Exactly three ids required for type {type} relations. You have provided {ids.Length}.");
+                    env.RelateMCN(ids[0], ids[1], ids[2], type, witnessId);
+                    if (Program._loadLog)
+                    {
+                        var m = env.RelData.GetModelById(ids[0]);
+                        var c = env.RelData.GetCardinalById(ids[1]);
+                        int n = ids[2];
+                        Console.WriteLine($"New relation '{m} \\models {c} {type} \\aleph_{n}' added.");
+                    }
+                }
+                else if (Sentence.TypeIndices.Contains(type))
+                {
+                    throw new NotImplementedException($"Type {type} not accounted for in programming (consider submitting a bug report).");
+                }
+                throw new ArgumentException($"{type} is not a valid relation type.");
             });
 
             // Add relation by symbol string
@@ -413,7 +436,7 @@ namespace CCView
                 CC Item1 = env.RelData.GetCardinalBySymbol(symbols[0]);
                 CC Item2 = env.RelData.GetCardinalBySymbol(symbols[1]);
                 int witnessId = pR.GetValue(witnessIdArgument);
-                env.RelateCardinals(Item1.Id, Item2.Id, type, witnessId);
+                env.RelateCtoC(Item1.Id, Item2.Id, type, witnessId);
                 Program.LoadLog($"Cardinals {Item1} and {Item2} related with type '{type}' relation.");
             });
 
@@ -496,6 +519,19 @@ namespace CCView
                 }
             });
 
+            Command listRelation = new("relation", "Get more information about a given relation.")
+            {
+                idArgument
+            };
+            listCommand.Subcommands.Add(listRelation);
+
+            listRelation.SetAction(pR =>
+            {
+                int id = pR.GetValue(idArgument);
+                Relation relation = env.RelData.GetRelationById(id) ?? throw new ArgumentException($"{id} is not the id of a relation.");
+                Console.WriteLine(relation.ToVerboseString(env.RelData));
+            });
+
             Command listArts = new("articles", "List of articles in the database.");
             listCommand.Subcommands.Add(listArts);
 
@@ -518,6 +554,18 @@ namespace CCView
                 }
             });
 
+            Command listModels = new("models", "List of models in the database.");
+            listCommand.Subcommands.Add(listModels);
+
+            listModels.SetAction(pR =>
+            {
+                foreach (Model m in env.Models.Values)
+                {
+                    Console.WriteLine(m);
+                }
+                return 0;
+            });
+
             Command listBetween = new("between", "List all cardinals lying between two given ids.")
             {
                 idArgument,
@@ -529,6 +577,39 @@ namespace CCView
             listBetween.SetAction(pR =>
             {
                 env.ListBetween(pR.GetValue(idArgument), pR.GetValue(idArgumentTwo));
+            });
+
+            Command listTypes = new("types", "List all valid relation symbols.");
+            listCommand.Subcommands.Add(listTypes);
+
+            listTypes.SetAction(pR =>
+            {
+                List<char> printedTypes = [];
+
+                string CtoCWriteString = "Cardinal-to-cardinal relations: ";
+                foreach (char type in Sentence.CtoCTypes)
+                {
+                    CtoCWriteString += type + ", ";
+                    printedTypes.Add(type);
+                }
+                Console.WriteLine(CtoCWriteString[..(Math.Min(0, CtoCWriteString.Length-2))]);
+
+                string MCNWriteString = "Model-cardinal-aleph relations: ";
+                foreach (char type in Sentence.MCNTypes)
+                {
+                    MCNWriteString += type + ", ";
+                    printedTypes.Add(type);
+                }
+                Console.WriteLine(MCNWriteString[..(Math.Min(0, MCNWriteString.Length - 2))]);
+
+                if (Sentence.TypeIndices.Count == printedTypes.Count + 1) return;
+
+                string UnexpectedTypes = "Unanticipated types (consider submitting a bug report): ";
+                foreach (char type in Sentence.TypeIndices.Where(t => !t.Equals('X') && !printedTypes.Contains(t)))
+                {
+                    UnexpectedTypes += type + ", ";
+                }
+                Console.WriteLine(UnexpectedTypes[..(Math.Min(0, UnexpectedTypes.Length - 2))]);
             });
 
             // Import article from ZBMath
@@ -748,9 +829,14 @@ namespace CCView
             RelData.AddCardinal(name, symbol);
             Unsaved = true;
         }
-        public void RelateCardinals(int idOne, int idTwo, char type, int witnessId)
+        public void RelateCtoC(int idOne, int idTwo, char type, int witnessId)
         {
             RelData.AddCtoCRelationByIds(idOne, idTwo, type, witnessId);
+            Unsaved = true;
+        }
+        public void RelateMCN(int modelId, int cardinalId, int aleph, char type, int witnessId)
+        {
+            RelData.AddMCNRelationByIds(modelId, cardinalId, aleph, type, witnessId);
             Unsaved = true;
         }
         public void AddArticle(string name, int date, string citation, int id)
@@ -912,8 +998,7 @@ namespace CCView
                 Console.Write("> ");
                 string input = Console.ReadLine() ?? "";
                 if (string.IsNullOrWhiteSpace(input)) continue;
-                string[] args = input.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                args = [.. args.Prepend("--fromShell")];
+                string[] args = [.. CommandLineParser.SplitCommandLine(input).Prepend("--fromShell")];
                 await rootCommand.Parse(args).InvokeAsync();
             }
         }
