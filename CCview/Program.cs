@@ -195,6 +195,11 @@ namespace CCView
                 DefaultValueFactory = p => "No description provided"
             };
 
+            Argument<string> fileArgument = new("File")
+            {
+                Description = "Path to a file from assets."
+            };
+
             Argument<string> typeArgument = new("Type")
             {
                 Description = "Type of the relation",
@@ -654,6 +659,27 @@ namespace CCView
             Command saveCommand = new("save", "Save the cardinals and relations.");
             rootCommand.Subcommands.Add(saveCommand);
             saveCommand.SetAction(pR => env.Save());
+
+            // Load
+            Command loadCommand = new("load", "(NOT IMPLEMENTED) Load the contents of a given file to the current relation environment.")
+            {
+                fileArgument,
+                descriptionArgument
+            };
+            rootCommand.Subcommands.Add(loadCommand);
+
+            loadCommand.SetAction(pR =>
+            {
+                string description = pR.GetValue(descriptionArgument) ?? "";
+                string file = RelationEnvironment.AddExtension(
+                    pR.GetValue(fileArgument) ?? throw new ArgumentException("You must include a file to load."),
+                    ".json");
+                string filePath = Path.Combine(env.LoadDirectory, file);
+                throw new NotImplementedException();
+#pragma warning disable CS0162 // Unreachable code detected
+                return 0; // This is to tell SetAction what kind of function we're feeding it.
+#pragma warning restore CS0162 // Unreachable code detected
+            });
 
             //Plot
             Command plotCommand = new("plot", "Draw the relations as a dot graph.") // IDs doesn't really work properly here
