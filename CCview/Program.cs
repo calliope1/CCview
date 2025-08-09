@@ -21,6 +21,7 @@ using System.Net.Http;
 using System.Reflection;
 using System.Reflection.Metadata.Ecma335;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Threading.Tasks;
@@ -141,11 +142,59 @@ namespace CCView
                 DefaultValueFactory = p => false
             };
 
+            Option<string[]> containsCardinalsOption = new("--cardinals")
+            {
+                Description = "Restrict search to those pertaining to the described cardinals",
+                DefaultValueFactory = p => []
+            };
+            containsCardinalsOption.Aliases.Add("-c");
+
+            Option<string[]> containsModelsOption = new("--models")
+            {
+                Description = "Restrict search to those pertaining to the described models",
+                DefaultValueFactory = p => []
+            };
+            containsModelsOption.Aliases.Add("-m");
+
+            Option<string[]> containsTypesOption = new("--types")
+            {
+                Description = "Restrict search to those pertaining to the given types",
+                DefaultValueFactory = p => []
+            };
+            containsModelsOption.Aliases.Add("-ty");
+
+            Option<string[]> inArticlesOption = new("--articles")
+            {
+                Description = "Restrict search to those pertaining to the described articles",
+                DefaultValueFactory = p => []
+            };
+            containsModelsOption.Aliases.Add("-ar");
+
+            Option<string[]> fromTheoremsOption = new("--theorems")
+            {
+                Description = "Restrict search to those pertaining to the described theorems",
+                DefaultValueFactory = p => []
+            };
+            containsModelsOption.Aliases.Add("-th");
+
+            Option<string[]> fromAgeSetOption = new("--ages")
+            {
+                Description = "Restrict search to those pertaining to the described ages",
+                DefaultValueFactory = p => []
+            };
+            containsModelsOption.Aliases.Add("-ag");
+
+            Option<string[]> fromIdSetOption = new("--ids")
+            {
+                Description = "Restrict search to those with the described ids",
+                DefaultValueFactory = p => []
+            };
+            containsModelsOption.Aliases.Add("-i");
+
             // Arguments //
             Argument<string> nameArgument = new("name")
             {
                 Description = "Name of cardinal characteristic."
-                //DefaultValueFactory = parseResult => ""
             };
 
             Argument<int[]> idsArgument = new("ids")
@@ -218,6 +267,7 @@ namespace CCView
                 Description = "Array of ints or strings representing the ids or symbols of objects",
                 DefaultValueFactory = p => []
             };
+
             // Commands //
 
             rootCommand.Options.Add(densityOption);
@@ -360,11 +410,53 @@ namespace CCView
                 Console.WriteLine(UnexpectedTypes[..(Math.Min(0, UnexpectedTypes.Length - 2))]);
             });
 
-            // Add cardinal
+            // Search objects
+            Command searchCommand = new("search", "Search data.");
+            rootCommand.Subcommands.Add(searchCommand);
+
+            // Search relations
+            Command searchRelations = new("relations", "Search relations.")
+            {
+                containsCardinalsOption, // Only those pertaining to certain cardinals
+                containsModelsOption, // Only those pertaining to certain models
+                containsTypesOption, // Only those of certain prescribed types
+                inArticlesOption, // etc.
+                fromTheoremsOption,
+                fromAgeSetOption,
+                fromIdSetOption
+            };
+            searchCommand.Subcommands.Add(searchRelations);
+
+            searchCommand.SetAction(pR =>
+            {
+                string[] cardinalSearch = pR.GetValue(containsCardinalsOption) ?? [];
+                string[] modelSearch = pR.GetValue(containsModelsOption) ?? [];
+                string[] typeSearch = pR.GetValue(containsTypesOption) ?? [];
+                string[] articleSearch = pR.GetValue(inArticlesOption) ?? [];
+                string[] theoremSearch = pR.GetValue(fromTheoremsOption) ?? [];
+                string[] ageSearch = pR.GetValue(fromAgeSetOption) ?? [];
+                string[] idSearch = pR.GetValue(fromIdSetOption) ?? [];
+                List<Relation> relationsInSearch = env.SearchRelations(
+                    cardinalSearch,
+                    modelSearch,
+                    typeSearch,
+                    articleSearch,
+                    theoremSearch,
+                    ageSearch,
+                    idSearch);
+                Console.WriteLine($"{relationsInSearch.Count} relations found.");
+                foreach (Relation relation in relationsInSearch)
+                {
+                    Console.WriteLine(relation);
+                }
+            });
+
+            // Add objects
             Command createCommand = new("create", "Create a new specified object.");
             createCommand.Aliases.Add("add");
             rootCommand.Subcommands.Add(createCommand);
 
+            // Add cardinal
             Command createCC = new("cardinal", "Create a new cardinal characteristic.")
             {
                 idOption,
@@ -396,7 +488,7 @@ namespace CCView
 
             // Add relation
             // Needs some retouching
-            Command createRelation = new("relation", "Legacy functionality. Add a relation between two cardinals.")
+            Command createRelation = new("relation", "Add a relation by ids.")
             {
                 witnessIdArgument,
                 typeArgument,
@@ -441,46 +533,23 @@ namespace CCView
                 throw new ArgumentException($"{type} is not a valid relation type.");
             });
 
-            // Add relation by symbol string
-            Command relateSymbolCommand = new("relationbysymbol", "Legacy functionality. Add a relation between two cardinals by their symbols.")
-            {
-                witnessIdArgument,
-                symbolsArgument,
-                typeOption
-            };
-            createCommand.Subcommands.Add(relateSymbolCommand);
-
-            relateSymbolCommand.Aliases.Add("rbs");
-
-            relateSymbolCommand.SetAction(pR =>
-            {
-                string[] symbols = pR.GetValue(symbolsArgument)!;
-                string typeString = pR.GetValue(typeOption) ?? "X";
-                char type = typeString[0];
-                CC Item1 = env.RelData.GetCardinalBySymbol(symbols[0]);
-                CC Item2 = env.RelData.GetCardinalBySymbol(symbols[1]);
-                int witnessId = pR.GetValue(witnessIdArgument);
-                env.RelateCtoC(Item1.Id, Item2.Id, type, witnessId);
-                Program.LoadLog($"Cardinals {Item1} and {Item2} related with type '{type}' relation.");
-            });
-
             // Add relation by ID *or* symbol string (best guess).
-            Command relateIdOrSymbol = new("relateIdOrSymbol", "Creates a relation by symbol or by id number. May not work if there is a cardinal with symbol equal to an integer.")
+            Command relateIdOrSymbol = new("relateByDescription", "Creates a relation identifying cardinals by id, symbol or name (and models by id).")
             {
                 witnessIdArgument,
                 typeArgument,
                 descriptionOfObjectsArgument
             };
-            hiddenCommand.Subcommands.Add(relateIdOrSymbol);
+            createCommand.Subcommands.Add(relateIdOrSymbol);
 
             relateIdOrSymbol.SetAction(pR =>
             {
                 string typeString = pR.GetValue(typeArgument) ?? throw new ArgumentException("You must provide a relation type");
                 char type = typeString[0];
                 int witnessId = pR.GetValue(witnessIdArgument);
-                string[] objectDescriptions = pR.GetValue(descriptionOfObjectsArgument) ?? throw new ArgumentException("You must provide the descriptions (ids or symbols) of objects being related.");
+                string[] objectDescriptions = pR.GetValue(descriptionOfObjectsArgument) ?? throw new ArgumentException("You must provide the descriptions (ids, symbols or names) of objects being related.");
                 Theorem theorem = env.RelData.GetTheoremById(witnessId) ?? throw new ArgumentException($"ID {witnessId} is not a valid theorem id");
-                env.AddResultToTheorembyIdOrSymbols(type, objectDescriptions, theorem);
+                env.AddResultToTheoremByProperties(type, objectDescriptions, theorem);
             });
 
             // Add relations by an ideal
@@ -984,9 +1053,9 @@ namespace CCView
             }
         }
 
-        public void AddResultToTheorembyIdOrSymbols(char type, string[] objectDescriptions, Theorem theorem)
+        public void AddResultToTheoremByProperties(char type, string[] objectDescriptions, Theorem theorem)
         {
-            List<int> ids = RelData.sentenceIdsFromIdsOrSymbols(type, objectDescriptions);
+            List<int> ids = RelData.sentenceIdsFromProperties(type, objectDescriptions);
             if (RelationDatabase.AddResultToTheorem(theorem, type, ids.ToArray()))
             {
                 Unsaved = true;
@@ -1106,6 +1175,44 @@ namespace CCView
             {
                 Console.WriteLine(RelData.GetCardinalById(cardinalId));
             }
+        }
+        public List<Relation> SearchRelations(string[] cardinalSearch, string[] modelSearch,
+            string[] typeSearch, string[] articleSearch, string[] theoremSearch,
+            string[] ageSearch, string[] idSearch)
+        {
+            (HashSet<int> CtoCItem1Ids, HashSet<int> CtoCItem2Ids, HashSet<int> MCNCardinalIds, HashSet<int> OtherCardinalIds) validCardinalIds = RelData.CardinalIdsSearch(cardinalSearch);
+            HashSet<int> modelIds = RelData.ModelIdsSearch(modelSearch);
+            HashSet<char> validTypes = RelData.TypesSearch(typeSearch);
+            HashSet<int> articleIds = RelData.ArticleIdsSearch(articleSearch);
+            HashSet<int> theoremIds = RelData.TheoremIdsSearch(theoremSearch);
+            HashSet<int> validAges = RelData.AgeSetSearch(ageSearch);
+            HashSet<int> validIds = RelData.RelationIdsSearch(idSearch);
+            List<Relation> outRelations = [];
+            foreach (Relation relation in Relations.Values)
+            {
+                if (!validTypes.Contains(relation.Type)) { continue; }
+                if (Sentence.CtoCTypes.Contains(relation.Type))
+                {
+                    if (!validCardinalIds.CtoCItem1Ids.Contains(relation.Item1Id)
+                        || !validCardinalIds.CtoCItem2Ids.Contains(relation.Item2Id)) { continue; }
+                }
+                if (Sentence.MCNTypes.Contains(relation.Type))
+                {
+                    if (!validCardinalIds.MCNCardinalIds.Contains(relation.CardinalId)) { continue; }
+                    if (!modelIds.Contains(relation.ModelId)) { continue; }
+                }
+                else
+                {
+                    if (!validCardinalIds.OtherCardinalIds.Contains(relation.CardinalId)) { continue; }
+                }
+                // This is union, so a relation touching any of the described theorems will be valid
+                if (relation.Derivation.All(atom => !theoremIds.Contains(atom.WitnessId))) { continue; }
+                if (!validAges.Contains(relation.Birthday)) { continue; }
+                if (!validIds.Contains(relation.Id)) { continue; }
+                outRelations.Add(relation);
+            }
+            return outRelations;
+            throw new NotImplementedException();
         }
     }
     public class InteractiveShell

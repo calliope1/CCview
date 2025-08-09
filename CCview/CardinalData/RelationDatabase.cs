@@ -1168,7 +1168,7 @@ namespace CCView.CardinalData.Compute
         }
         public CC AddCardinal(string? name, string? symbol, int id)
         {
-            if (Cardinals.ContainsKey(id)) // Order of operations is important here or you'll get errors for id >= CCI.Count
+            if (Cardinals.ContainsKey(id))
             {
                 throw new ArgumentException($"ID {id} is in use by {GetCardinalById(id)}.");
             }
@@ -1183,7 +1183,7 @@ namespace CCView.CardinalData.Compute
                 Console.WriteLine($"Warning: Another cardinal {otherCardinal} with the name {name} already exists.");
             }
             var newCardinal = new CC(id, name!, symbol!);
-            Cardinals[id] = newCardinal; // It's important to do this before adding the cardinal
+            Cardinals[id] = newCardinal;
             Console.WriteLine($"Added new cardinal: {newCardinal}");
             return newCardinal;
         }
@@ -1284,7 +1284,7 @@ namespace CCView.CardinalData.Compute
             return Relations.TryGetValue(newRelation.Id, out Relation? relation) && (newRelation.Equals(relation));
         }
 
-        public List<int> sentenceIdsFromIdsOrSymbols(char type, string[] objectDescriptions)
+        public List<int> sentenceIdsFromProperties(char type, string[] objectDescriptions)
         {
             List<int> ids = [];
             if (Sentence.CtoCTypes.Contains(type))
@@ -1296,7 +1296,8 @@ namespace CCView.CardinalData.Compute
                 ids = objectDescriptions.Select(description =>
                 {
                     if (int.TryParse(description, out int result)) { return result; }
-                    return GetCardinalBySymbol(description).Id;
+                    CC? match = CardinalFromProperties(description);
+                    return match == null ? throw new ArgumentException($"No cardinal with description {description} exists.") : match.Id;
                 }).ToList();
                 return ids;
             }
@@ -1309,8 +1310,14 @@ namespace CCView.CardinalData.Compute
                 ids.Add(int.Parse(objectDescriptions[0]));
                 int cardinalId;
                 if (int.TryParse(objectDescriptions[1], out int result)) { cardinalId = result; }
-                else { cardinalId = GetCardinalBySymbol(objectDescriptions[1]).Id; }
+                else
+                {
+                    CC? match = CardinalFromProperties(objectDescriptions[1]);
+                    cardinalId = match == null ? throw new ArgumentException($"No cardinal with description {objectDescriptions[1]} exists.") : match.Id;
+                }
+                ids.Add(cardinalId);
                 int aleph = int.Parse(objectDescriptions[2]);
+                ids.Add(aleph);
                 return ids;
             }
             if (type == 'X')
@@ -1318,6 +1325,10 @@ namespace CCView.CardinalData.Compute
                 return [];
             }
             throw new ArgumentException($"Unexpected type {type} used in argument.");
+        }
+        public CC? CardinalBySymbolOrNull(string symbol)
+        {
+            return Cardinals.Values.FirstOrDefault(cardinal => cardinal!.SymbolString.Equals(symbol), null);
         }
         public CC GetCardinalBySymbol(string symbol)
         {
@@ -1330,6 +1341,10 @@ namespace CCView.CardinalData.Compute
             {
                 throw new ArgumentException($"No cardinal with symbol {symbol} found.");
             }
+        }
+        public CC? CardinalByNameOrNull(string name)
+        {
+            return Cardinals.Values.FirstOrDefault(cardinal => cardinal!.Name.Equals(name), null);
         }
         public CC GetCardinalByName(string name)
         {
@@ -1361,6 +1376,73 @@ namespace CCView.CardinalData.Compute
             }
             return newAtoms;
         }
+        /// <summary>
+        /// Get a cardinal from one of its properties, checking (in order): ID number, symbol, and name.
+        /// </summary>
+        /// <param name="property">String of either the id, symbol or name of the cardinal.</param>
+        /// <returns>The cardinal, if found. Null otherwise.</returns>
+        public CC? CardinalFromProperties(string property)
+        {
+            if (int.TryParse(property, out int id))
+            {
+                if (Cardinals.TryGetValue(id, out CC? cardinal))
+                {
+                    return cardinal;
+                }
+            }
+            CC? match = CardinalBySymbolOrNull(property);
+            if (match != null)
+            {
+                return match;
+            }
+            return CardinalByNameOrNull(property);
+        }
+        /// <summary>
+        /// Returns true if the input is n--m, where n and m are integers, giving the integer range of those numbers if so.
+        /// </summary>
+        /// <param name="input"></param>
+        /// <param name="intRange">All numbers from n to m (inclusive), or empty if m <= n.</param>
+        /// <returns>True if string is of the form "n--m", where n and m are integers.</returns>
+        public static bool TryStringIsIntRange(string input, out IEnumerable<int> intRange)
+        {
+            intRange = [];
+            if (!input.Contains("--") || input.Split("--").Length != 2)
+            {
+                return false;
+            }
+            string[] splitInput = input.Split("--");
+            if (int.TryParse(splitInput[0], out int lowerBound) && int.TryParse(splitInput[1], out int upperBound))
+            {
+                if (upperBound <= lowerBound)
+                {
+                    intRange = [];
+                }
+                else
+                {
+                    intRange = Enumerable.Range(lowerBound, upperBound - lowerBound + 1);
+                }
+                return true;
+            }
+            return false;
+        }
+        public (HashSet<int> CtoCItem1Ids, HashSet<int> CtoCItem2Ids, HashSet<int> MCNCardinalIds, HashSet<int> OtherCardinalIds) CardinalIdsSearch(string[] cardinalSearch)
+        {
+            throw new NotImplementedException();
+        }
+        public HashSet<int> ModelIdsSearch(string[] modelSearch)
+        {
+            throw new NotImplementedException();
+        }
+        public HashSet<char> TypesSearch(string[] typeSearch)
+            { throw new NotImplementedException(); }
+        public HashSet<int> ArticleIdsSearch(string[] articleSearch)
+            { throw new NotImplementedException(); }
+        public HashSet<int> TheoremIdsSearch(string[] theoremSearch)
+            { throw new NotImplementedException(); }
+        public HashSet<int> AgeSetSearch(string[] ageSearch)
+            { throw new NotImplementedException(); }
+        public HashSet<int> RelationIdsSearch(string[] idSearch)
+            { throw new NotImplementedException(); }
     }
 }
 // Should this be moved to GraphLogic?
