@@ -1,6 +1,8 @@
 # CCview (WORK IN PROGRESS)
 A cardinal characteristics of the continuum calculator.
 
+While early on changes were pushed as they came in order to store code within GitHub, now that the project is public I have created a private in-development version. Therefore, changes will be larger in scale and less frequent henceforth. Hopefully soon I will only be pushing entirely polished changes, but not yet; I am still partially using this to demonstrate my C# skills.
+
 CCview is designed to make working with cardinal characteristics easier, by:
 * Automating some calculations (transitivity of $\leq$, proving $\text{Con}(a > b)$, etc.).
 * Finding appropriate models for desired configurations of cardinal characteristics.
