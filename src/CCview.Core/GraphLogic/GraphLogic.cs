@@ -1,24 +1,23 @@
 ﻿using QuikGraph;
 using QuikGraph.Graphviz;
-using CCView.CardinalData;
-using CCView.CardinalData.Compute;
-using CC = CCView.CardinalData.CardinalCharacteristic;
+using CC = CCview.Core.DataClasses.CardinalCharacteristic;
 using QuikGraph.Algorithms;
-using CCView.CardinalData.QGInterface;
+using CCview.Core.DataClasses;
+using CCview.Core.Services;
 
-namespace CCView.GraphLogic
+namespace CCview.Core.GraphLogic
 {
     public class GraphHandler
     {
         // Return a minimal collection of relations (of Type type) that involve only those CCs in cardinals
-        public static Dictionary<int, Relation> OldestCtoCMinimalSample(IEnumerable<CC> cardinals, IEnumerable<Relation> relations, char type)
+        public static Dictionary<int, Relation> OldestCtoCMinimalSample(IEnumerable<CC> cardinals, IEnumerable<Relation> relations, char symbol)
         {
             IEnumerable<int> validIds = cardinals.Select(c => c.Id);
-            if (!Sentence.CtoCTypes.Contains(type)) throw new ArgumentException($"Type {type} is not valid for CtoC operations.");
+            if (!RelationType.IsCtoC(symbol)) throw new ArgumentException($"Type {symbol} is not valid for CtoC operations.");
             Dictionary<(int, int), Relation> agedRels = [];
             foreach (Relation r in relations)
             {
-                if (r.Type != type
+                if (r.Relationship.Symbol != symbol
                     || !validIds.Contains(r.Item1Id)
                     || !validIds.Contains(r.Item2Id))
                 {
@@ -39,25 +38,25 @@ namespace CCView.GraphLogic
             return agedRels.ToDictionary(kvp => kvp.Value.Id, kvp => kvp.Value);
         }
         // This is not fast, but it does do the job
-        public static HashSet<HashSet<CC>> EquivalenceClasses(Dictionary<int, CC> cardinals, Dictionary<int, Relation> relations)
+        public static HashSet<HashSet<CC>> EquivalenceClasses(IReadOnlyDictionary<int, CC> cardinals, Dictionary<int, Relation> relations)
         {
             Dictionary<int, HashSet<int>> teamNames = [];
             IEnumerable<int> validIds = cardinals.Select(c => c.Key);
             foreach (int id in validIds) teamNames[id] = [id];
             foreach (Relation r1 in relations.Values)
             {
-                if (r1.Type == '=')
+                if (r1.Relationship.Symbol.Equals('='))
                 {
                     if (!validIds.Contains(r1.Item1Id) || !validIds.Contains(r1.Item2Id)) { continue; }
                     teamNames[r1.Item1Id].UnionWith(teamNames[r1.Item2Id]);
                     teamNames[r1.Item2Id].UnionWith(teamNames[r1.Item1Id]);
                     continue;
                 }
-                else if (r1.Type == '>')
+                else if (r1.Relationship.Symbol.Equals('>'))
                 {
                     foreach (Relation r2 in relations.Values)
                     {
-                        if (r2.Type == '>'
+                        if (r2.Relationship.Symbol.Equals('>')
                             && r1.Item1Id.Equals(r2.Item2Id)
                             && r1.Item2Id.Equals(r2.Item1Id))
                         {
@@ -92,10 +91,6 @@ namespace CCView.GraphLogic
             return graph;
         }
     }
-}
-
-namespace CCView.GraphLogic.Vis
-{
     public class GraphDrawer
     {
         public static string GenerateGraph(Dictionary<int, CC> cardinals, HashSet<Relation> relations, RelationDatabase rd)
@@ -108,7 +103,7 @@ namespace CCView.GraphLogic.Vis
 
             algorithm.FormatVertex += (sender, args) =>
             {
-                args.VertexFormat.Label = args.Vertex.SymbolString;
+                args.VertexFormat.Label = args.Vertex.EquationSymbol;
             };
 
             graph.AddVertexRange(allVertices);
@@ -150,13 +145,21 @@ namespace CCView.GraphLogic.Vis
             Console.WriteLine($"Graph image generated as {Path.Combine(outputFilePath, outputFileName)}");
         }
     }
-}
-
-namespace CCView.GraphLogic.Algorithms
-{
+    public class RelEdge : Edge<CC>
+    {
+        public Relation Relation { get; }
+        public RelEdge(Relation relation, RelationDatabase rd) : base(rd.GetCardinalById(relation.Ids[0])!, rd.GetCardinalById(relation.Ids[1])!)
+        {
+            Relation = relation;
+        }
+        public override string ToString()
+        {
+            return Relation.ToString();
+        }
+    }
     public static class GraphAlgorithm
     {
-        public static HashSet<Relation> TransitiveReduction(Dictionary<int, CC> desiredCardinals, Dictionary<int, Relation> relations)
+        public static HashSet<Relation> TransitiveReduction(IReadOnlyDictionary<int, CC> desiredCardinals, Dictionary<int, Relation> relations)
         {
             Sentence testSentence = new('>', [-1, -1]);
             HashSet<Relation> minimalRelations = [];
@@ -167,18 +170,21 @@ namespace CCView.GraphLogic.Algorithms
 
             foreach (var rel in relations.Values)
             {
-                if (rel.Type != '>'
+                if (!rel.Relationship.Symbol.Equals('>')
                     || rel.Item1Id.Equals(rel.Item2Id)
                     || !minimalIds.Contains(rel.Item1Id)
                     || !minimalIds.Contains(rel.Item2Id)) continue;
                 bool toAdd = true;
+                // We have rel = ``rel.Item1Id > rel.Item2Id``
+                // Now loop over minimalIds to see if there is both ``id > rel.Item2Id`` and ``rel.Item1Id > id``
+                // If so, throw out rel, since it's not minimal
                 foreach (int id in minimalIds)
                 {
                     if (id.Equals(rel.Item1Id) || id.Equals(rel.Item2Id)) continue;
-                    testSentence.Ids = [rel.Item1Id, id];
+                    testSentence = new('>', [rel.Item1Id, id]);
                     if (sentences.Contains(testSentence))
                     {
-                        testSentence.Ids = [id, rel.Item2Id];
+                        testSentence = new('>', [id, rel.Item2Id]);
                         if (sentences.Contains(testSentence))
                         {
                             toAdd = false;
@@ -190,12 +196,12 @@ namespace CCView.GraphLogic.Algorithms
             }
             return minimalRelations;
         }
-        public static HashSet<Relation> DensityTransitiveReduction(Dictionary<int, CC> cardinals, Dictionary<int, Relation> relations, Dictionary<(int, int), HashSet<int>> density)
+        public static HashSet<Relation> DensityTransitiveReduction(IReadOnlyDictionary<int, CC> cardinals, Dictionary<int, Relation> relations, Dictionary<(int, int), HashSet<int>> density)
         {
             HashSet<Relation> minimalRelations = [];
             foreach (Relation r in relations.Values)
             {
-                if (r.Type != '>') continue;
+                if (!r.Relationship.Symbol.Equals('>')) continue;
                 // If density[(a, b)] is empty then it won't even be a key
                 if (density.TryGetValue((r.Item1Id, r.Item2Id), out HashSet<int>? inBetween)
                     && inBetween.Intersect(cardinals.Values.Select(cardinal => cardinal.Id)).Any()) continue;

@@ -1,18 +1,9 @@
-﻿// Actual feature list to implement pre-web-app:
-// Modified graphs that show lines through based on a particular model
-// Exporting to TikZ
-// A basic collection of articles, models and cardinals to test with
-// Better command line interface for plotting
-// Commands to add custom articles, theorems and models
-// Implement 'best (oldest) proof' style logic (done?)
-// Add validators to the arguments and options
+﻿// This gets the commands out of Program.cs while we work on the new CLI.
 
-// Dependencies
-// These need to be cleaned up at some point
-using CCView.CardinalData;
-using CCView.CardinalData.Compute;
-using CCView.GraphLogic;
-using CCView.JsonHandler;
+using CCview.Core.DataClasses;
+using CCview.Core.GraphLogic;
+using CCview.Core.JsonHandler;
+using CCview.Core.Services;
 using System;
 using System.Collections;
 using System.CommandLine;
@@ -25,22 +16,18 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Threading.Tasks;
-using CC = CCView.CardinalData.CardinalCharacteristic;
+using CC = CCview.Core.DataClasses.CardinalCharacteristic;
+using ICC = CCview.Core.Interfaces.ICardinalCharacteristic;
+using Newtonsoft.Json.Linq;
+using CCview.Core.JsonHandler.DataParsers;
+using CCview.Core.Interfaces;
+using CCview.CLI.Commands;
 
-namespace CCView
+namespace CCview.CLI.Commands
 {
-    public class Program
+    internal class CLI_old_commands
     {
-        private static readonly bool _loadLog = true;
-        public static bool ShouldExit { get; private set; } = false;
-        static async Task<int> Main(string[] args)
-        {
-            // For now we assume that we are only ever working with one set of files: cardinal_characteristics.json and relations.json
-            var Env = new RelationEnvironment();
-            return await Run(Env, args);
-        }
-
-        public static async Task<int> Run(RelationEnvironment env, string[] args)
+        public static RootCommand CreateRootCommand(RelationEnvironment env)
         {
             RootCommand rootCommand = new("Cardinal characteristics visualiser!");
             Command hiddenCommand = new("hidden", "Internal-only commands that cannot be called by the user.");
@@ -294,13 +281,13 @@ namespace CCView
             };
             listCommand.Subcommands.Add(listRels);
 
-            listRels.SetAction(pR =>
+            listRels.SetAction((Func<ParseResult, int>)(pR =>
             {
                 if (!pR.GetValue(noSymbolsOption))
                 {
                     foreach (Relation r in env.RelData.Relations.Values)
                     {
-                        Console.WriteLine(r.ToStringWithSymbols(env.RelData.Cardinals));
+                        Console.WriteLine(r.ToStringWithSymbols<CC>((IReadOnlyDictionary<int, CC>)env.RelData.Cardinals));
                     }
                 }
                 else
@@ -311,7 +298,7 @@ namespace CCView
                     }
                 }
                 return 0;
-            });
+            }));
 
             Command listRelation = new("relation", "Get more information about a given relation.")
             {
@@ -319,12 +306,12 @@ namespace CCView
             };
             listCommand.Subcommands.Add(listRelation);
 
-            listRelation.SetAction(pR =>
+            listRelation.SetAction((Action<ParseResult>)(pR =>
             {
                 int id = pR.GetValue(idArgument);
                 Relation relation = env.RelData.GetRelationById(id) ?? throw new ArgumentException($"{id} is not the id of a relation.");
                 Console.WriteLine(relation.ToVerboseString(env.RelData));
-            });
+            }));
 
             Command listArts = new("articles", "List of articles in the database.");
             listCommand.Subcommands.Add(listArts);
@@ -385,7 +372,7 @@ namespace CCView
                 List<char> printedTypes = [];
 
                 string CtoCWriteString = "Cardinal-to-cardinal relations: ";
-                foreach (char type in Sentence.CtoCTypes)
+                foreach (char type in RelationType.CtoCTypes)
                 {
                     CtoCWriteString += type + ", ";
                     printedTypes.Add(type);
@@ -393,17 +380,17 @@ namespace CCView
                 Console.WriteLine(CtoCWriteString[..(Math.Min(0, CtoCWriteString.Length - 2))]);
 
                 string MCNWriteString = "Model-cardinal-aleph relations: ";
-                foreach (char type in Sentence.MCNTypes)
+                foreach (char type in RelationType.MCNTypes)
                 {
                     MCNWriteString += type + ", ";
                     printedTypes.Add(type);
                 }
                 Console.WriteLine(MCNWriteString[..(Math.Min(0, MCNWriteString.Length - 2))]);
 
-                if (Sentence.TypeIndices.Count == printedTypes.Count + 1) return;
+                if (RelationType.AnticipatedTypes.Count == printedTypes.Count + 1) return;
 
                 string UnexpectedTypes = "Unanticipated types (consider submitting a bug report): ";
-                foreach (char type in Sentence.TypeIndices.Where(t => !t.Equals('X') && !printedTypes.Contains(t)))
+                foreach (char type in RelationType.AnticipatedTypes.Where(t => !t.Equals('X') && !printedTypes.Contains(t)))
                 {
                     UnexpectedTypes += type + ", ";
                 }
@@ -502,31 +489,21 @@ namespace CCView
                 string typeString = pR.GetValue(typeArgument) ?? throw new ArgumentException("You must include a relation type");
                 char type = typeString[0];
                 int witnessId = pR.GetValue(witnessIdArgument);
-                if (Sentence.CtoCTypes.Contains(type))
+                if (RelationType.CtoCTypes.Contains(type))
                 {
                     if (ids.Length != 2) throw new ArgumentException($"Exactly two ids required for type {type} relations. You have provided {ids.Length}.");
                     env.RelateCtoC(ids[0], ids[1], type, witnessId);
-                    if (Program._loadLog)
-                    {
-                        var c1 = env.RelData.GetCardinalById(ids[0]);
-                        var c2 = env.RelData.GetCardinalById(ids[1]);
-                        Console.WriteLine($"Cardinals {c1} and {c2} related with type '{type}' relation.");
-                    }
+                    Logging.LogDebug($"Cardinals {env.RelData.GetCardinalById(ids[0])} and {env.RelData.GetCardinalById(ids[1])} related with type '{type}' relation.");
                     return 0;
                 }
-                else if (Sentence.MCNTypes.Contains(type))
+                else if (RelationType.MCNTypes.Contains(type))
                 {
                     if (ids.Length != 3) throw new ArgumentException($"Exactly three ids required for type {type} relations. You have provided {ids.Length}.");
                     env.RelateMCN(ids[0], ids[1], ids[2], type, witnessId);
-                    if (Program._loadLog)
-                    {
-                        var m = env.RelData.GetModelById(ids[0]);
-                        var c = env.RelData.GetCardinalById(ids[1]);
-                        int n = ids[2];
-                        Console.WriteLine($"New relation '{m} \\models {c} {type} \\aleph_{n}' added.");
-                    }
+                    Logging.LogDebug($"New relation '{env.RelData.GetModelById(ids[0])} \\models {env.RelData.GetCardinalById(ids[1])} {type} \\aleph_{ids[2]}' added.");
+                    return 0;
                 }
-                else if (Sentence.TypeIndices.Contains(type))
+                else if (RelationType.AnticipatedTypes.Contains(type))
                 {
                     throw new NotImplementedException($"Type {type} not accounted for in programming (consider submitting a bug report).");
                 }
@@ -573,7 +550,7 @@ namespace CCView
                 (int, int)[] relationIndices = [(3, 2), (3, 1), (3, 0), (2, 0), (1, 0)];
                 foreach ((int i, int j) in relationIndices)
                 {
-                    env.RelateCtoC(newCardinals[i].Id, newCardinals[j].Id, '>', -2);
+                    env.RelateCtoC(newCardinals[i].GetId(), newCardinals[j].GetId(), '>', -2);
                 }
                 Console.WriteLine($"Added four new cardinals associated with the {idealName} ideal.");
             });
@@ -806,7 +783,7 @@ namespace CCView
             {
                 string zb = pR.GetValue(zbArgument) ?? throw new ArgumentException("You must include a zb identifier.");
                 await env.ImportArticle(zb);
-             });
+            });
 
             Command importTestCommand = new("itest", "Test importing an article via a ZBMath number.");
             rootCommand.Subcommands.Add(importTestCommand);
@@ -852,461 +829,7 @@ namespace CCView
                 }
                 else if (pR.GetValue(densityOption)) env.PopulateDensity();
             });
-            return await rootCommand.Parse(args).InvokeAsync();
-        }
-
-        public static string GetOutputPath(string filename)
-        {
-            var baseDir = AppContext.BaseDirectory;
-            var projectRoot = Path.GetFullPath(Path.Combine(baseDir, @"../../../"));
-            return Path.Combine(projectRoot, "output", filename);
-        }
-
-        public static string GetOutputPath() => GetOutputPath("");
-        public static string LoadLog(string message)
-        {
-            if (_loadLog) Console.WriteLine(message);
-            return _loadLog ? message : "";
-        }
-    }
-
-    public class RelationEnvironment
-    {
-        private string BaseDirectory { get; set; }
-        public string LoadDirectory { get; set; }
-        // We should change from having a different '<T>File' and '<T>Path' etc to a few dictionaries
-        //public Dictionary<string, string> LoadFiles { get; set; } = [];
-        public string CCFile { get; set; } = "cardinal_characteristics";
-        public string RelsFile { get; set; } = "relations";
-        public string ArtsFile { get; set; } = "articles";
-        public string ThmsFile { get; set; } = "theorems";
-        public string ModsFile { get; set; } = "models";
-        public string CCPath { get; set; }
-        public string RelsPath { get; set; }
-        public string ArtsPath { get; set; }
-        public string ThmsPath { get; set; }
-        public string ModsPath { get; set; }
-        public string OutDirectory { get; set; }
-        public string DotFile { get; set; } = "relations";
-        public string GraphFile { get; set; } = "graph";
-        public string DotPath { get; set; }
-        public string GraphPath { get; set; }
-
-        //private Dictionary<int, CC> LoadedCardinals = [];
-        //private HashSet<Relation> LoadedRelations;
-        //private Dictionary<int, Article> LoadedArticles;
-        //private Dictionary<int, Theorem> LoadedTheorems;
-        //private Dictionary<int, Model> LoadedModels;
-        public RelationDatabase RelData = new();
-        public bool Unsaved { get; private set; } = false;
-        public Dictionary<int, CC> Cardinals => RelData.Cardinals;
-        public Dictionary<int, Article> Articles => RelData.Articles;
-        public Dictionary<int, Theorem> Theorems => RelData.Theorems;
-        public Dictionary<int, Model> Models => RelData.Models;
-        public Dictionary<int, Relation> Relations => RelData.Relations;
-
-
-        public RelationEnvironment(string ccFile, string relsFile, string dotFile, string graphFile, string artsFile, string thmsFile, string modsFile)
-        {
-            Program.LoadLog("Loading Relation Environment.");
-            BaseDirectory = AppContext.BaseDirectory;
-            LoadDirectory = Path.GetFullPath(Path.Combine(BaseDirectory, @"../../../assets/"));
-            OutDirectory = Path.GetFullPath(Path.Combine(BaseDirectory, @"../../../output/"));
-
-            CCFile = AddExtension(ccFile, ".json", "Cardinal characteristics file");
-            RelsFile = AddExtension(relsFile, ".json", "RelData file");
-            DotFile = AddExtension(dotFile, ".dot", "Dot file");
-            GraphFile = AddExtension(graphFile, ".png", "Graph file");
-            ArtsFile = AddExtension(artsFile, ".json", "Articles file");
-            ThmsFile = AddExtension(thmsFile, ".json", "Theorems file");
-            ModsFile = AddExtension(modsFile, ".json", "Models file");
-
-            CCPath = Path.Combine(LoadDirectory, CCFile);
-            RelsPath = Path.Combine(LoadDirectory, RelsFile);
-            DotPath = Path.Combine(OutDirectory, DotFile);
-            GraphPath = Path.Combine(OutDirectory, GraphFile);
-            ArtsPath = Path.Combine(LoadDirectory, ArtsFile);
-            ThmsPath = Path.Combine(LoadDirectory, ThmsFile);
-            ModsPath = Path.Combine(LoadDirectory, ModsFile);
-
-            //LoadedCardinals = JsonInterface.LoadCardinals(CCPath);
-            Program.LoadLog("Loading cardinals.");
-            var LoadedCardinals = JsonFileHandler.Load<CC>(CCPath);
-            Program.LoadLog("Loading articles.");
-            var LoadedArticles = JsonFileHandler.Load<Article>(ArtsPath);
-            Program.LoadLog("Loading theorems.");
-            var LoadedTheorems = JsonFileHandler.LoadTheorems(ThmsPath, LoadedCardinals, LoadedArticles);
-            Program.LoadLog("Loading models.");
-            var LoadedModels = JsonFileHandler.LoadModels(ModsPath, LoadedCardinals, LoadedArticles, LoadedTheorems);
-            Program.LoadLog("Loading relations.");
-            var LoadedRelations = JsonFileHandler.LoadRelations(RelsPath, LoadedTheorems);
-            Program.LoadLog("Creating Relation Database environment.");
-            RelData = new RelationDatabase(LoadedCardinals, LoadedRelations, LoadedArticles, LoadedTheorems, LoadedModels);
-            Program.LoadLog("Populating atomic relations.");
-            int atomsCreated = RelData.GenerateAtoms();
-            Program.LoadLog($"Created {atomsCreated} atoms.");
-            Program.LoadLog("Generating trivial relations.");
-            int trivialRelationsCreated = RelData.CreateTrivialRelations();
-            Program.LoadLog($"{trivialRelationsCreated} new relations generated.");
-            Program.LoadLog("Relation Environment complete.");
-        }
-
-        public RelationEnvironment() : this("cardinal_characteristics", "relations", "relations", "graph", "articles", "theorems", "models")
-        {
-        }
-        public void RegenerateAtoms()
-        {
-            Program.LoadLog("Repopulating atomic relations.");
-            int atomsCreated = RelData.GenerateAtoms();
-            Program.LoadLog($"Created {atomsCreated} new atoms.");
-            if (atomsCreated == 0) return;
-            Program.LoadLog("Generating new trivial relations.");
-            int trivialRelationsCreated = RelData.CreateTrivialRelations(true);
-            Program.LoadLog($"{trivialRelationsCreated} new relations generated.\nConsider running 'trans'.");
-        }
-
-        public static string AddExtension(string file, string ext, string fileDescription)
-            // Checks if a file name has an appropriate extension. Warns if not.
-        {
-            var outFile = file;
-            var fExt = Path.GetExtension(file);
-            if (fExt != ext)
-            {
-                outFile += ext;
-                if (fExt != "")
-                {
-                    Console.WriteLine($"Warning: {fileDescription} has extension other than {ext}. Programme will attempt to use {file}.{ext}");
-                }
-            }
-            return outFile;
-        }
-
-        public static string AddExtension(string file, string ext)
-        {
-            return AddExtension(file, ext, "File");
-        }
-
-
-        public void Save()
-        {
-            Unsaved = false;
-            JsonFileHandler.Save(CCPath, Cardinals);
-            Program.LoadLog($"Cardinals saved to {CCPath}.");
-            JsonFileHandler.Save(RelsPath, Relations);
-            Program.LoadLog($"RelData saved to {RelsPath}.");
-            JsonFileHandler.Save(ArtsPath, Articles);
-            Program.LoadLog($"Articles saved to {ArtsPath}.");
-            JsonFileHandler.Save(ThmsPath, Theorems);
-            Program.LoadLog($"Theorems saved to {ThmsPath}.");
-            JsonFileHandler.Save(ModsPath, Models);
-            Program.LoadLog($"Models saved to {ModsPath}.");
-        }
-
-        public void AddCardinal(string? name, string? symbol, int id)
-        {
-            RelData.AddCardinal(name, symbol, id);
-            Unsaved = true;
-        }
-        public CC AddCardinal(string? name, string? symbol)
-        {
-            CC newCardinal = RelData.AddCardinal(name, symbol);
-            Unsaved = true;
-            return newCardinal;
-        }
-        public void RelateCtoC(int idOne, int idTwo, char type, int witnessId)
-        {
-            RelData.AddCtoCRelationByIds(idOne, idTwo, type, witnessId);
-            Unsaved = true;
-        }
-        public void RelateMCN(int modelId, int cardinalId, int aleph, char type, int witnessId)
-        {
-            RelData.AddMCNRelationByIds(modelId, cardinalId, aleph, type, witnessId);
-            Unsaved = true;
-        }
-        public void AddArticle(string name, int date, string citation, int id)
-        {
-            RelData.AddArticle(name, date, citation, id);
-            Unsaved = true;
-        }
-        public void AddArticle(string name, int date, string citation)
-        {
-            RelData.AddArticle(name, date, citation);
-            Unsaved = true;
-        }
-        public Theorem AddTheorem(Article article, string description, int id)
-        {
-            Theorem newTheorem = RelData.AddTheorem(article, description, [], id);
-            Unsaved = true;
-            return newTheorem;
-        }
-        public Theorem AddTheorem(Article article, string description)
-        {
-            Theorem newTheorem = RelData.AddTheorem(article, description, []);
-            Unsaved = true;
-            return newTheorem;
-        }
-        public void AddResultToTheorem(Theorem theorem, char type, int[] ids)
-        {
-            if (RelationDatabase.AddResultToTheorem(theorem, type, ids))
-            {
-                Unsaved = true;
-            }
-        }
-
-        public void AddResultToTheoremByProperties(char type, string[] objectDescriptions, Theorem theorem)
-        {
-            List<int> ids = RelData.sentenceIdsFromProperties(type, objectDescriptions);
-            if (RelationDatabase.AddResultToTheorem(theorem, type, ids.ToArray()))
-            {
-                Unsaved = true;
-            }
-        }
-        public void AddModel(Article article, string description, int id)
-        {
-            RelData.AddModel(article, description, id);
-            Unsaved = true;
-        }
-        public void AddModel(Article article, string description)
-        {
-            RelData.AddModel(article, description);
-            Unsaved = true;
-        }
-        public async Task ImportArticle(string zb)
-        {
-            string url = $"https://api.zbmath.org/v1/document/{zb}";
-            Console.WriteLine($"Attempting to access {url}.");
-            string json = await InteractiveShell.GETString(url);
-            Article article = JsonFileHandler.DeserializeArticle(json);
-            RelData.AddArticle(article);
-            Console.WriteLine($"New article {article} added.");
-            Unsaved = true;
-        }
-        public void TransClose()
-        {
-            int numNewRels = RelData.LogicTransClose();
-            if (numNewRels > 0) Unsaved = true;
-        }
-
-        public string PlotGraphDot(int[] ids, string fileName)
-        {
-            Dictionary<int, CC> cardinals = RelData.Cardinals
-                .Where(kvp => ids.Contains(kvp.Key))
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-            HashSet<HashSet<CC>> equivalenceClasses = GraphHandler.EquivalenceClasses(cardinals, RelData.Relations);
-            IEnumerable<CC> transversal = equivalenceClasses.Select(equivalenceClass => equivalenceClass.First());
-            cardinals = cardinals.Where(kvp => transversal.Contains(kvp.Value)).ToDictionary();
-            var dot = GraphLogic.Vis.GraphDrawer.GenerateGraph(cardinals, RelData.GetMinimalRelations(cardinals), RelData);
-            GraphLogic.Vis.GraphDrawer.WriteDotFile(dot, Path.Combine(OutDirectory, fileName));
-            return dot;
-        }
-
-        public string PlotGraphDot(int[] ids)
-        {
-            return PlotGraphDot(ids, DotFile);
-        }
-        public void PlotGraphPng(string dotFileName, string fileName, string dotArgument)
-        {
-            string extension = dotArgument[2..dotArgument.Length];
-            int lastFullStop = fileName.LastIndexOf('.');
-            string filePrefix = fileName[..lastFullStop];
-            string fileSuffix = fileName[(lastFullStop + 1)..fileName.Length];
-            if (fileSuffix != extension)
-            {
-                Console.WriteLine($"Warning: The extension given ({fileSuffix}) does not match the given suffix argument ({extension}).");
-                Console.Write($"Save to {filePrefix}.{extension} instead? [Y]es/[N]o (Default: Yes):");
-                string response = Console.ReadLine() ?? "y";
-                string[] validResponses = ["y", "n", "yes", "no"];
-                do
-                {
-                    if (response.Equals("y", StringComparison.OrdinalIgnoreCase))
-                    {
-                        fileName = $"{filePrefix}.{extension}";
-                    }
-                    else if (response.Equals("n", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-                    else
-                    {
-                        Console.Write("Response not recognised, try again: ");
-                        response = Console.ReadLine() ?? "y";
-                    }
-                }
-                while (!validResponses.Contains(response.ToLower()));
-            }
-            GraphLogic.Vis.GraphDrawer.WritePngFile(OutDirectory, dotFileName, OutDirectory, fileName, dotArgument);
-        }
-        public void PopulateDensity()
-        {
-            if (RelData.PopulateDensity()) Unsaved = true;
-        }
-        public void ListBetween(int id1, int id2)
-        {
-            if (!RelData.DynamicDensity)
-            {
-                Console.WriteLine("In betweenness relation not yet calculated. Try running --btwn first.");
-                return;
-            }
-            CC cardinal1 = RelData.GetCardinalById(id1)!;
-            CC cardinal2 = RelData.GetCardinalById(id2)!;
-            if (cardinal1 == null || cardinal2 == null)
-            {
-                throw new ArgumentException("One of the input ids returns a null cardinal");
-            }
-            if (!RelData.Density.TryGetValue((id1, id2), out HashSet<int>? density))
-            {
-                Console.WriteLine($"There are no cardinals between {cardinal1} and {cardinal2}");
-                return;
-            }
-            if (density.Count == 0)
-            {
-                Console.WriteLine($"There are no cardinals between {cardinal1} and {cardinal2}");
-                return;
-            }
-            if (density.Count == 1)
-            {
-                Console.WriteLine($"There is 1 cardinal between {cardinal1} and {cardinal2}");
-            }
-            else
-            {
-                Console.WriteLine($"There are {density.Count} cardinals between {cardinal1} and {cardinal2}");
-            }
-            foreach (int cardinalId in density)
-            {
-                Console.WriteLine(RelData.GetCardinalById(cardinalId));
-            }
-        }
-        public List<Relation> SearchRelations(string[] cardinalSearch, string[] modelSearch,
-            string[] typeSearch, string[] articleSearch, string[] theoremSearch,
-            string[] ageSearch, string[] idSearch)
-        {
-            (HashSet<int> CtoCItem1Ids, HashSet<int> CtoCItem2Ids, HashSet<int> MCNCardinalIds, HashSet<int> OtherCardinalIds) validCardinalIds = RelData.CardinalIdsSearch(cardinalSearch);
-            HashSet<int> modelIds = RelData.ModelIdsSearch(modelSearch);
-            HashSet<char> validTypes = RelData.TypesSearch(typeSearch);
-            HashSet<int> articleIds = RelData.ArticleIdsSearch(articleSearch);
-            HashSet<int> theoremIds = RelData.TheoremIdsSearch(theoremSearch);
-            HashSet<int> validAges = RelData.AgeSetSearch(ageSearch);
-            HashSet<int> validIds = RelData.RelationIdsSearch(idSearch);
-            List<Relation> outRelations = [];
-            foreach (Relation relation in Relations.Values)
-            {
-                if (!validTypes.Contains(relation.Type)) { continue; }
-                if (Sentence.CtoCTypes.Contains(relation.Type))
-                {
-                    if (!validCardinalIds.CtoCItem1Ids.Contains(relation.Item1Id)
-                        || !validCardinalIds.CtoCItem2Ids.Contains(relation.Item2Id)) { continue; }
-                }
-                if (Sentence.MCNTypes.Contains(relation.Type))
-                {
-                    if (!validCardinalIds.MCNCardinalIds.Contains(relation.CardinalId)) { continue; }
-                    if (!modelIds.Contains(relation.ModelId)) { continue; }
-                }
-                else
-                {
-                    if (!validCardinalIds.OtherCardinalIds.Contains(relation.CardinalId)) { continue; }
-                }
-                // This is union, so a relation touching any of the described theorems will be valid
-                if (relation.Derivation.All(atom => !theoremIds.Contains(atom.WitnessId))) { continue; }
-                if (!validAges.Contains(relation.Birthday)) { continue; }
-                if (!validIds.Contains(relation.Id)) { continue; }
-                outRelations.Add(relation);
-            }
-            return outRelations;
-            throw new NotImplementedException();
-        }
-    }
-    public class InteractiveShell
-    {
-        private bool ShouldExit = false;
-        private readonly RelationEnvironment env;
-        private readonly RootCommand rootCommand;
-        private static readonly HttpClient Client = new();
-        private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true }; 
-        public InteractiveShell(RelationEnvironment env, RootCommand rootCommand)
-        {
-            this.env = env;
-            this.rootCommand = rootCommand;
-            AddExitCommand();
-        }
-        public void AddExitCommand()
-        {
-            var exitCommand = new Command("exit", "Exit the shell.");
-            exitCommand.SetAction(pR =>
-            {
-                if (env.Unsaved)
-                {
-                    Console.Write("You have unsaved changes. Exit anyway? [Y]es/[N]o (Default No): ");
-                    string verify = Console.ReadLine() ?? "N";
-                    if (verify.Equals("yes", StringComparison.OrdinalIgnoreCase) || verify.Equals("y", StringComparison.OrdinalIgnoreCase))
-                    {
-                        ShouldExit = true;
-                    }
-                }
-                else
-                {
-                    ShouldExit = true;
-                }
-                return Task.CompletedTask;
-            });
-
-            rootCommand.Subcommands.Add(exitCommand);
-        }
-        public async Task Run()
-        {
-            while (!ShouldExit)
-            {
-                Console.Write("> ");
-                string input = Console.ReadLine() ?? "";
-                if (string.IsNullOrWhiteSpace(input)) continue;
-                string[] args = [.. CommandLineParser.SplitCommandLine(input).Prepend("--fromShell")];
-                await rootCommand.Parse(args).InvokeAsync();
-            }
-        }
-        public static async Task<string> GETString(string url)
-        {
-            try
-            {
-                return await Client.GetStringAsync(url);
-            }
-            catch (HttpRequestException e)
-            {
-                throw new ArgumentException($"Error fetching page: {e.Message}");
-            }
-        }
-        public static async Task RepeatCommand(Command command, string[] prependArgs, string exitCode, (string commandPhrase, Command command)[] otherCommands)
-        {
-            bool shouldLeaveRepeatCommand = false;
-            while (!shouldLeaveRepeatCommand)
-            {
-                Console.Write(">> ");
-                string input = Console.ReadLine() ?? "";
-                if (string.IsNullOrWhiteSpace(input)) continue;
-                if (input == exitCode)
-                {
-                    break;
-                }
-                else
-                {
-                    string[] inputArgs = CommandLineParser.SplitCommandLine(input).ToArray();
-                    if (inputArgs.Length == 0)
-                    {
-                        continue;
-                    }
-                    bool isOtherCommand = false;
-                    foreach (var (commandPhrase, commandExecution) in otherCommands)
-                    {
-                        if (commandPhrase.Equals(inputArgs[0], StringComparison.OrdinalIgnoreCase))
-                        {
-                            await commandExecution.Parse(inputArgs.Skip(1).ToArray()).InvokeAsync();
-                            isOtherCommand = true;
-                            break;
-                        }
-                    }
-                    if (isOtherCommand) continue;
-                    string[] args = [.. prependArgs, .. inputArgs];
-                    await command.Parse(args).InvokeAsync();
-                }
-            }
+            return rootCommand;
         }
     }
 }
